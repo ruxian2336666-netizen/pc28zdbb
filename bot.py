@@ -1,10 +1,27 @@
+# ==================== 假端口（让 Render 不报错） ====================
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import os
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+def start_dummy_server():
+    port = int(os.environ.get("PORT", 10000))
+    HTTPServer(("0.0.0.0", port), Handler).serve_forever()
+
+import threading
+threading.Thread(target=start_dummy_server, daemon=True).start()
+
+# ==================== 真正的 Bot 代码 ====================
 import requests
 import time
 import math
 import random
 from datetime import datetime
 import json
-import threading
 
 # ==================== 配置区 ====================
 BOT_TOKEN = "8789627493:AAFZd5F2tRHZqfslhEDKksngWK06uNiTbUU"
@@ -23,10 +40,10 @@ MAX_CONSECUTIVE_LOSS = 1
 # 全局状态
 authorized_users = set()
 broadcast_running = False
-current_algo = None  # "v7_double", "v7_kill", "v7_ball"
+current_algo = None
 consecutive_loss = 0
 last_update_id = 0
-bot_username = ""  # 机器人用户名，启动时自动获取
+bot_username = ""
 
 # 候选参数范围
 PARAM_RANGES = {
@@ -36,7 +53,7 @@ PARAM_RANGES = {
     "小双": (11, 17)
 }
 
-# ==================== 算法核心函数（保持不变） ====================
+# ==================== 算法核心函数 ====================
 def get_category(total):
     size = "大" if total >= 14 else "小"
     oe = "单" if total % 2 == 1 else "双"
@@ -285,45 +302,59 @@ def get_updates():
 def handle_command(chat_id, text, user_id, username):
     global broadcast_running, current_algo, authorized_users
     
-    # 群组命令：@机器人 帮助
+    # 处理群聊中 @Bot 的消息
     if f"@{bot_username}" in text:
-        if "帮助" in text or "help" in text.lower():
+        clean_text = text.replace(f"@{bot_username}", "").strip()
+        
+        # 群聊登录
+        if clean_text == ADMIN_PASSWORD:
+            if user_id not in authorized_users:
+                authorized_users.add(user_id)
+                send_message(chat_id, "✅ 登录成功！\n\n现在可以使用：\n@Bot 切换算法 双组\n@Bot 切换算法 杀组\n@Bot 切换算法 杀球")
+            else:
+                send_message(chat_id, "🔐 您已登录")
+            return
+        
+        # 群聊帮助
+        if clean_text in ["帮助", "help"]:
             help_text = """🤖 **可用命令**
 
 **切换算法：**
-• `切换算法 双组` - 切换到V7双组版
-• `切换算法 杀组` - 切换到V7杀组版  
-• `切换算法 杀球` - 切换到V7杀b球版
+• @Bot 切换算法 双组
+• @Bot 切换算法 杀组
+• @Bot 切换算法 杀球
 
-**其他命令：**
-• `帮助` - 显示此帮助
-• `状态` - 查看当前播报状态
-• `停止` - 停止播报
-
-**管理员命令：**
-• `登录 [密码]` - 登录管理员"""
+**其他：**
+• @Bot 帮助
+• @Bot 状态
+• @Bot 停止"""
             send_message(chat_id, help_text)
             return
         
-        if "切换算法" in text:
+        # 需要登录才能用的命令
+        if user_id not in authorized_users:
+            send_message(chat_id, "❌ 请先登录：@Bot 密码")
+            return
+        
+        if "切换算法" in clean_text:
             if not broadcast_running:
-                send_message(chat_id, "❌ 请先登录并启动播报")
+                send_message(chat_id, "❌ 播报未启动，请先私聊Bot启动")
                 return
             
-            if "双组" in text:
+            if "双组" in clean_text:
                 current_algo = "v7_double"
                 send_message(chat_id, "✅ 已切换到 V7 双组版")
-            elif "杀组" in text:
+            elif "杀组" in clean_text:
                 current_algo = "v7_kill"
                 send_message(chat_id, "✅ 已切换到 V7 杀组版")
-            elif "杀球" in text or "杀b" in text:
+            elif "杀球" in clean_text or "杀b" in clean_text:
                 current_algo = "v7_ball"
                 send_message(chat_id, "✅ 已切换到 V7 杀b球版")
             else:
-                send_message(chat_id, "❌ 请指定算法：双组 / 杀组 / 杀球")
+                send_message(chat_id, "❌ 请指定：双组 / 杀组 / 杀球")
             return
         
-        if "状态" in text:
+        if "状态" in clean_text:
             if broadcast_running:
                 algo_name = {"v7_double":"双组","v7_kill":"杀组","v7_ball":"杀b球"}.get(current_algo, "未知")
                 send_message(chat_id, f"🟢 播报中\n当前算法：{algo_name}")
@@ -331,7 +362,7 @@ def handle_command(chat_id, text, user_id, username):
                 send_message(chat_id, "🔴 播报已停止")
             return
         
-        if "停止" in text:
+        if "停止" in clean_text:
             broadcast_running = False
             send_message(chat_id, "⏹️ 播报已停止")
             return
@@ -475,10 +506,8 @@ def broadcast_loop():
             time.sleep(1)
 
 # ==================== 主程序 ====================
-# 获取Bot用户名
 get_bot_info()
 
-# 启动播报线程
 broadcast_thread = threading.Thread(target=broadcast_loop, daemon=True)
 broadcast_thread.start()
 
