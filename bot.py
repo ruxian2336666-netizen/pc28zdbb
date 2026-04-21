@@ -44,6 +44,8 @@ current_algo = None
 consecutive_loss = 0
 last_update_id = 0
 bot_username = ""
+last_send_time = 0
+last_send_text = ""
 
 # 候选参数范围
 PARAM_RANGES = {
@@ -265,6 +267,16 @@ def get_latest_data():
     return history
 
 def send_channel_message(text):
+    global last_send_time, last_send_text
+    now = time.time()
+    
+    if now - last_send_time < 1 and text == last_send_text:
+        print("⏭️ 跳过重复发送")
+        return
+    
+    last_send_time = now
+    last_send_text = text
+    
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     for channel in CHANNEL_IDS:
         try:
@@ -302,11 +314,9 @@ def get_updates():
 def handle_command(chat_id, text, user_id, username):
     global broadcast_running, current_algo, authorized_users
     
-    # 处理群聊中 @Bot 的消息
     if f"@{bot_username}" in text:
         clean_text = text.replace(f"@{bot_username}", "").strip()
         
-        # 群聊登录
         if clean_text == ADMIN_PASSWORD:
             if user_id not in authorized_users:
                 authorized_users.add(user_id)
@@ -315,7 +325,6 @@ def handle_command(chat_id, text, user_id, username):
                 send_message(chat_id, "🔐 您已登录")
             return
         
-        # 群聊帮助
         if clean_text in ["帮助", "help"]:
             help_text = """🤖 **可用命令**
 
@@ -331,7 +340,6 @@ def handle_command(chat_id, text, user_id, username):
             send_message(chat_id, help_text)
             return
         
-        # 需要登录才能用的命令
         if user_id not in authorized_users:
             send_message(chat_id, "❌ 请先登录：@Bot 密码")
             return
@@ -364,10 +372,9 @@ def handle_command(chat_id, text, user_id, username):
         
         if "停止" in clean_text:
             broadcast_running = False
-            send_message(chat_id, "⏹️ 播报已停止")
+            send_message(chat_id, "⏹️ 播报已停止，历史战绩已清空")
             return
     
-    # 私聊命令
     if text == "/start":
         send_message(chat_id, "🔐 请输入管理员密码：")
     
@@ -396,7 +403,7 @@ def handle_command(chat_id, text, user_id, username):
             send_message(chat_id, "🚀 V7杀b球版已启动，开始24小时播报...")
         elif text == "停止播报":
             broadcast_running = False
-            send_message(chat_id, "⏹️ 播报已停止")
+            send_message(chat_id, "⏹️ 播报已停止，历史战绩已清空")
         else:
             send_message(chat_id, "请选择一个算法：", {
                 "keyboard": [
@@ -405,6 +412,16 @@ def handle_command(chat_id, text, user_id, username):
                 ],
                 "resize_keyboard": True
             })
+
+def reset_stats():
+    """清空历史战绩"""
+    global stats, history_lines, pending_prediction, consecutive_loss, last_issue
+    stats = {"hit": 0, "total": 0}
+    history_lines = []
+    pending_prediction = None
+    consecutive_loss = 0
+    last_issue = None
+    print("🔄 历史战绩已清空")
 
 def broadcast_loop():
     global broadcast_running, current_algo, consecutive_loss
@@ -503,6 +520,13 @@ def broadcast_loop():
                 print(f"错误: {e}")
                 time.sleep(10)
         else:
+            # 当播报停止时，清空历史
+            if not broadcast_running:
+                stats = {"hit": 0, "total": 0}
+                history_lines = []
+                pending_prediction = None
+                consecutive_loss = 0
+                last_issue = None
             time.sleep(1)
 
 # ==================== 主程序 ====================
