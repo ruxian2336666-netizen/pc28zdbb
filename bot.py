@@ -1,21 +1,3 @@
-# ==================== 假端口（让 Render 不报错） ====================
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import os
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is running")
-
-def start_dummy_server():
-    port = int(os.environ.get("PORT", 10000))
-    HTTPServer(("0.0.0.0", port), Handler).serve_forever()
-
-import threading
-threading.Thread(target=start_dummy_server, daemon=True).start()
-
-# ==================== 真正的 Bot 代码 ====================
 import requests
 import time
 import math
@@ -127,9 +109,11 @@ def predict_kill_with_params(history, params):
     cat1 = TAIL_TO_CATEGORY[tail1]
     cat2 = TAIL_TO_CATEGORY[tail2]
     
+    # 🔥 杀组逻辑
     if cat1 == cat2:
         kill = OPPOSITE[cat1]
     else:
+        # 统计近期频率,杀出现多的(追冷)
         freq1 = sum(1 for h in history[1:10] if h["category"] == cat1)
         freq2 = sum(1 for h in history[1:10] if h["category"] == cat2)
         kill = cat1 if freq1 >= freq2 else cat2
