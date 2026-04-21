@@ -413,16 +413,6 @@ def handle_command(chat_id, text, user_id, username):
                 "resize_keyboard": True
             })
 
-def reset_stats():
-    """清空历史战绩"""
-    global stats, history_lines, pending_prediction, consecutive_loss, last_issue
-    stats = {"hit": 0, "total": 0}
-    history_lines = []
-    pending_prediction = None
-    consecutive_loss = 0
-    last_issue = None
-    print("🔄 历史战绩已清空")
-
 def broadcast_loop():
     global broadcast_running, current_algo, consecutive_loss
     stats = {"hit": 0, "total": 0}
@@ -430,6 +420,7 @@ def broadcast_loop():
     pending_prediction = None
     last_issue = None
     best_params = {"大单": 12, "小单": 13, "大双": 14, "小双": 15}
+    processing = False
     
     while True:
         if broadcast_running and current_algo:
@@ -442,7 +433,9 @@ def broadcast_loop():
                 current = history[0]
                 current_issue = current["issue"]
                 
-                if current_issue != last_issue:
+                if current_issue != last_issue and not processing:
+                    processing = True
+                    
                     if consecutive_loss >= MAX_CONSECUTIVE_LOSS:
                         for k in PARAM_RANGES:
                             mid = (PARAM_RANGES[k][0] + PARAM_RANGES[k][1]) / 2
@@ -468,7 +461,13 @@ def broadcast_loop():
                         if is_hit:
                             stats["hit"] += 1
                             consecutive_loss = 0
-                            history_lines[-1] += "🈵"
+                            # 根据算法类型显示不同标记
+                            if current_algo == "v7_double":
+                                history_lines[-1] += "🈵"
+                            elif current_algo == "v7_kill":
+                                history_lines[-1] += "🀄️"
+                            elif current_algo == "v7_ball":
+                                history_lines[-1] += "✅"
                         else:
                             consecutive_loss += 1
                             history_lines[-1] += "❌"
@@ -514,13 +513,14 @@ def broadcast_loop():
                         send_channel_message(full_msg)
                     
                     last_issue = current_issue
+                    processing = False
                 
                 time.sleep(PREDICT_INTERVAL)
             except Exception as e:
                 print(f"错误: {e}")
+                processing = False
                 time.sleep(10)
         else:
-            # 当播报停止时，清空历史
             if not broadcast_running:
                 stats = {"hit": 0, "total": 0}
                 history_lines = []
