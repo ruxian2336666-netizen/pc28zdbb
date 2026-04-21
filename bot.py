@@ -4,6 +4,7 @@ import math
 import random
 from datetime import datetime
 import json
+import threading
 
 # ==================== 配置区 ====================
 BOT_TOKEN = "8789627493:AAFZd5F2tRHZqfslhEDKksngWK06uNiTbUU"
@@ -20,11 +21,12 @@ MAX_CONSECUTIVE_LOSS = 1
 # =================================================
 
 # 全局状态
-authorized_users = set()  # 已授权的用户ID
+authorized_users = set()
 broadcast_running = False
 current_algo = None  # "v7_double", "v7_kill", "v7_ball"
 consecutive_loss = 0
 last_update_id = 0
+bot_username = ""  # 机器人用户名，启动时自动获取
 
 # 候选参数范围
 PARAM_RANGES = {
@@ -34,7 +36,7 @@ PARAM_RANGES = {
     "小双": (11, 17)
 }
 
-# ==================== 算法核心函数（和之前一样） ====================
+# ==================== 算法核心函数（保持不变） ====================
 def get_category(total):
     size = "大" if total >= 14 else "小"
     oe = "单" if total % 2 == 1 else "双"
@@ -89,8 +91,15 @@ def get_market_state(history):
     else:
         return "震荡", 3
 
+def get_category_by_tail(tail):
+    mapping = {0:"小双",1:"小单",2:"小双",3:"小单",4:"小双",5:"大单",6:"大双",7:"大单",8:"大双",9:"大单"}
+    return mapping.get(tail, "大单")
+
+def get_opposite(cat):
+    mapping = {"大单":"小双","大双":"小单","小单":"大双","小双":"大单"}
+    return mapping.get(cat, "小双")
+
 def predict_v7_double(history, params):
-    """V7双组预测"""
     if len(history) < 5:
         return None
     latest = history[0]
@@ -116,7 +125,6 @@ def predict_v7_double(history, params):
     return [cat1, cat2], market_state, window_size
 
 def predict_v7_kill(history, params):
-    """V7杀组预测"""
     if len(history) < 5:
         return None
     latest = history[0]
@@ -146,7 +154,6 @@ def predict_v7_kill(history, params):
     return kill, market_state, window_size
 
 def predict_v7_ball(history, params):
-    """V7杀b球预测"""
     if len(history) < 5:
         return None
     latest = history[0]
@@ -166,14 +173,6 @@ def predict_v7_ball(history, params):
     decimal = raw - int(raw)
     kill_balls = get_three_digits(decimal)
     return kill_balls, market_state, window_size
-
-def get_category_by_tail(tail):
-    mapping = {0:"小双",1:"小单",2:"小双",3:"小单",4:"小双",5:"大单",6:"大双",7:"大单",8:"大双",9:"大单"}
-    return mapping.get(tail, "大单")
-
-def get_opposite(cat):
-    mapping = {"大单":"小双","大双":"小单","小单":"大双","小双":"大单"}
-    return mapping.get(cat, "小双")
 
 def evaluate_params(history, params, algo_type):
     hits = 0
@@ -256,12 +255,21 @@ def send_channel_message(text):
         except:
             pass
 
-def send_private_message(chat_id, text, reply_markup=None):
+def send_message(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": chat_id, "text": text}
     if reply_markup:
         data["reply_markup"] = json.dumps(reply_markup)
     requests.post(url, data=data)
+
+def get_bot_info():
+    global bot_username
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getMe"
+    resp = requests.get(url)
+    data = resp.json()
+    if data.get("ok"):
+        bot_username = data["result"]["username"]
+        print(f"🤖 Bot用户名: @{bot_username}")
 
 def get_updates():
     global last_update_id
@@ -274,15 +282,67 @@ def get_updates():
     except:
         return []
 
-def handle_command(chat_id, text, user_id):
+def handle_command(chat_id, text, user_id, username):
     global broadcast_running, current_algo, authorized_users
     
+    # 群组命令：@机器人 帮助
+    if f"@{bot_username}" in text:
+        if "帮助" in text or "help" in text.lower():
+            help_text = """🤖 **可用命令**
+
+**切换算法：**
+• `切换算法 双组` - 切换到V7双组版
+• `切换算法 杀组` - 切换到V7杀组版  
+• `切换算法 杀球` - 切换到V7杀b球版
+
+**其他命令：**
+• `帮助` - 显示此帮助
+• `状态` - 查看当前播报状态
+• `停止` - 停止播报
+
+**管理员命令：**
+• `登录 [密码]` - 登录管理员"""
+            send_message(chat_id, help_text)
+            return
+        
+        if "切换算法" in text:
+            if not broadcast_running:
+                send_message(chat_id, "❌ 请先登录并启动播报")
+                return
+            
+            if "双组" in text:
+                current_algo = "v7_double"
+                send_message(chat_id, "✅ 已切换到 V7 双组版")
+            elif "杀组" in text:
+                current_algo = "v7_kill"
+                send_message(chat_id, "✅ 已切换到 V7 杀组版")
+            elif "杀球" in text or "杀b" in text:
+                current_algo = "v7_ball"
+                send_message(chat_id, "✅ 已切换到 V7 杀b球版")
+            else:
+                send_message(chat_id, "❌ 请指定算法：双组 / 杀组 / 杀球")
+            return
+        
+        if "状态" in text:
+            if broadcast_running:
+                algo_name = {"v7_double":"双组","v7_kill":"杀组","v7_ball":"杀b球"}.get(current_algo, "未知")
+                send_message(chat_id, f"🟢 播报中\n当前算法：{algo_name}")
+            else:
+                send_message(chat_id, "🔴 播报已停止")
+            return
+        
+        if "停止" in text:
+            broadcast_running = False
+            send_message(chat_id, "⏹️ 播报已停止")
+            return
+    
+    # 私聊命令
     if text == "/start":
-        send_private_message(chat_id, "🔐 请输入管理员密码：")
+        send_message(chat_id, "🔐 请输入管理员密码：")
     
     elif text == ADMIN_PASSWORD and user_id not in authorized_users:
         authorized_users.add(user_id)
-        send_private_message(chat_id, "✅ 登录成功！请选择播报算法：", {
+        send_message(chat_id, "✅ 登录成功！请选择播报算法：", {
             "keyboard": [
                 [{"text": "V7 双组版"}, {"text": "V7 杀组版"}],
                 [{"text": "V7 杀b球版"}, {"text": "停止播报"}]
@@ -294,20 +354,20 @@ def handle_command(chat_id, text, user_id):
         if text == "V7 双组版":
             current_algo = "v7_double"
             broadcast_running = True
-            send_private_message(chat_id, "🚀 V7双组版已启动，开始24小时播报...")
+            send_message(chat_id, "🚀 V7双组版已启动，开始24小时播报...")
         elif text == "V7 杀组版":
             current_algo = "v7_kill"
             broadcast_running = True
-            send_private_message(chat_id, "🚀 V7杀组版已启动，开始24小时播报...")
+            send_message(chat_id, "🚀 V7杀组版已启动，开始24小时播报...")
         elif text == "V7 杀b球版":
             current_algo = "v7_ball"
             broadcast_running = True
-            send_private_message(chat_id, "🚀 V7杀b球版已启动，开始24小时播报...")
+            send_message(chat_id, "🚀 V7杀b球版已启动，开始24小时播报...")
         elif text == "停止播报":
             broadcast_running = False
-            send_private_message(chat_id, "⏹️ 播报已停止")
+            send_message(chat_id, "⏹️ 播报已停止")
         else:
-            send_private_message(chat_id, "请选择一个算法：", {
+            send_message(chat_id, "请选择一个算法：", {
                 "keyboard": [
                     [{"text": "V7 双组版"}, {"text": "V7 杀组版"}],
                     [{"text": "V7 杀b球版"}, {"text": "停止播报"}]
@@ -347,8 +407,7 @@ def broadcast_loop():
                     
                     best_params, _ = adaptive_grid_search(history, current_algo)
                     
-                    # 验证上一期
-                    if pending_prediction:
+                    if pending_prediction is not None:
                         is_hit = False
                         if current_algo == "v7_double":
                             is_hit = current["category"] in pending_prediction
@@ -371,7 +430,6 @@ def broadcast_loop():
                         else:
                             history_lines[-1] += str(current['total']).zfill(2)
                     
-                    # 预测下一期
                     if current_algo == "v7_double":
                         result = predict_v7_double(history, best_params)
                         if result:
@@ -400,11 +458,11 @@ def broadcast_loop():
                             balls_str = "/".join(str(b) for b in balls)
                             history_lines.append(f"{short}期.杀b{balls_str}")
                     
-                    # 发送播报
                     if history_lines:
                         rate = stats["hit"] / stats["total"] if stats["total"] > 0 else 0
                         param_str = f"{best_params['大单']}/{best_params['小单']}/{best_params['大双']}/{best_params['小双']}"
-                        full_msg = f"願得一人心({current_algo} {param_str})\n" + "\n".join(history_lines[-15:]) + f"\n📊 {stats['hit']}中{stats['total']} 命中率{rate*100:.1f}%"
+                        algo_show = {"v7_double":"双组","v7_kill":"杀组","v7_ball":"杀b球"}.get(current_algo, "")
+                        full_msg = f"願得一人心({algo_show} {param_str})\n" + "\n".join(history_lines[-15:]) + f"\n📊 {stats['hit']}中{stats['total']} 命中率{rate*100:.1f}%"
                         send_channel_message(full_msg)
                     
                     last_issue = current_issue
@@ -417,15 +475,15 @@ def broadcast_loop():
             time.sleep(1)
 
 # ==================== 主程序 ====================
-import threading
+# 获取Bot用户名
+get_bot_info()
 
 # 启动播报线程
 broadcast_thread = threading.Thread(target=broadcast_loop, daemon=True)
 broadcast_thread.start()
 
-print("🤖 Bot 已启动，等待命令...")
+print(f"🤖 Bot 已启动，等待命令... (用户名: @{bot_username})")
 
-# 主循环：处理用户消息
 while True:
     try:
         updates = get_updates()
@@ -435,8 +493,9 @@ while True:
                 msg = update["message"]
                 chat_id = msg["chat"]["id"]
                 user_id = msg["from"]["id"]
+                username = msg["from"].get("username", "")
                 text = msg.get("text", "")
-                handle_command(chat_id, text, user_id)
+                handle_command(chat_id, text, user_id, username)
         time.sleep(2)
     except Exception as e:
         print(f"主循环错误: {e}")
