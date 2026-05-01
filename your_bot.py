@@ -364,10 +364,9 @@ def make_slay_func(st, lb, th):
     return slay_model
 
 
-# ==================== 204个模型（彻底修复闭包） ====================
+# ==================== 204个模型 ====================
 ALL_MODELS = {}
 
-# 预定义参数
 DUAL_PARAMS = []
 for idx in range(1, 101):
     DUAL_PARAMS.append({
@@ -388,7 +387,6 @@ for idx in range(1, 101):
         "th": random.choice([2, 3, 4, 5])
     })
 
-# 注册双组模型
 for p in DUAL_PARAMS:
     mid = p["id"]
     ALL_MODELS[mid] = {
@@ -396,7 +394,6 @@ for p in DUAL_PARAMS:
         "info": {"id": mid, "name": f"双组M{mid}", "type": "双组", "params": f"K:{p['kw']} Y:{p['yw']} B:{p['bs']} M:{p['mm']} O:{p['uo']}"}
     }
 
-# 注册杀组模型
 for p in SLAY_PARAMS:
     mid = p["id"]
     ALL_MODELS[mid] = {
@@ -404,7 +401,6 @@ for p in SLAY_PARAMS:
         "info": {"id": mid, "name": f"杀组M{mid}", "type": "杀组", "params": f"S:{p['st']} L:{p['lb']} T:{p['th']}"}
     }
 
-# 4个原始算法
 ALL_MODELS[201] = {"func": lambda h, k=None, y=None: algo_v8_hybrid(h, k, y), "info": {"id": 201, "name": "V8-Hybrid 双组(原)", "type": "双组", "params": "原始权重"}}
 ALL_MODELS[202] = {"func": lambda h, k=None, y=None: algo_4d_pi(h), "info": {"id": 202, "name": "4D-PI+PHI 双组(原)", "type": "双组", "params": "原始算力"}}
 ALL_MODELS[203] = {"func": lambda h, k=None, y=None: algo_v23_armor(h), "info": {"id": 203, "name": "Armor V23 杀组(原)", "type": "杀组", "params": "原始装甲"}}
@@ -493,11 +489,11 @@ def run_model_pred(model_id, history, keno, yl):
 # ==================== 指令 ====================
 @bot.message_handler(commands=['start'])
 def welcome(m):
-    text = "**欢迎来到『小鶴神』矩阵终端 V20.0**\n━━━━━━━━━━━━━━\n集成204个顶级PC28演算模型\n• 1-100 双组 | 101-200 杀组 | 201-204 原始\n━━━━━━━━━━━━━━\n输入编号即可预测"
+    text = "欢迎来到『小鶴神』矩阵终端 V20.0\n━━━━━━━━━━━━━━\n集成204个顶级PC28演算模型\n1-100 双组 | 101-200 杀组 | 201-204 原始\n━━━━━━━━━━━━━━\n输入编号即可预测"
     if check_auth(m.chat.id):
         bot.send_message(m.chat.id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
     else:
-        bot.send_photo(m.chat.id, IMG_LOGO, caption=text, reply_markup=auth_keyboard(), parse_mode="Markdown")
+        bot.send_photo(m.chat.id, IMG_LOGO, caption=text, reply_markup=auth_keyboard())
 
 @bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 算法胜率排行", "📈 数据走势分析", "🔍 模型编号查询"])
 def protected_features(m):
@@ -546,7 +542,7 @@ def predict_by_model_id(m):
         next_issue = int(history[0]['nbr']) + 1
         if info["type"] == "双组":
             res_list = result[0] if isinstance(result, tuple) else result
-            pred_text = f"🔥 双组: 【 **{res_list[0]} + {res_list[1]}** 】"
+            pred_text = f"🔥 双组: 【 {res_list[0]} + {res_list[1]} 】"
         else:
             if isinstance(result, tuple):
                 slay_item = result[0][0]
@@ -554,9 +550,17 @@ def predict_by_model_id(m):
             else:
                 slay_item = result[0]
                 reason = "智能杀组"
-            pred_text = f"🚫 必杀: 【 **{slay_item}** 】\n📝 {reason}"
-        msg = f"🎯 **{info['name']}** ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}"
-        bot.send_message(m.chat.id, msg, parse_mode="Markdown", reply_markup=predict_refresh_keyboard(model_id))
+            pred_text = f"🚫 必杀: 【 {slay_item} 】\n📝 {reason}"
+        msg = (f"🎯 {info['name']} ({model_id})\n"
+               f"━━━━━━━━━━━━━━\n"
+               f"📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n"
+               f"🎯 预测: {next_issue}期\n\n"
+               f"{pred_text}\n"
+               f"━━━━━━━━━━━━━━\n"
+               f"📈 近{test_len}期: {win_count/test_len*100:.1f}%\n"
+               f"🔥 连中: {streak} | 最大: {max_streak}\n"
+               f"⚙️ {info['params']}")
+        bot.send_message(m.chat.id, msg, reply_markup=predict_refresh_keyboard(model_id))
     except Exception as e:
         bot.send_message(m.chat.id, f"❌ 处理异常: {e}")
 
@@ -590,13 +594,21 @@ def cb_refresh(c):
         next_issue = int(history[0]['nbr']) + 1
         if info["type"] == "双组":
             res_list = result[0] if isinstance(result, tuple) else result
-            pred_text = f"🔥 双组: 【 **{res_list[0]} + {res_list[1]}** 】"
+            pred_text = f"🔥 双组: 【 {res_list[0]} + {res_list[1]} 】"
         else:
             if isinstance(result, tuple): slay_item = result[0][0]; reason = result[1]
             else: slay_item = result[0]; reason = "智能杀组"
-            pred_text = f"🚫 必杀: 【 **{slay_item}** 】\n📝 {reason}"
-        msg = f"🔄 **{info['name']}** ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}"
-        bot.edit_message_text(msg, chat_id, c.message.message_id, parse_mode="Markdown", reply_markup=predict_refresh_keyboard(model_id))
+            pred_text = f"🚫 必杀: 【 {slay_item} 】\n📝 {reason}"
+        msg = (f"🔄 {info['name']} ({model_id})\n"
+               f"━━━━━━━━━━━━━━\n"
+               f"📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n"
+               f"🎯 预测: {next_issue}期\n\n"
+               f"{pred_text}\n"
+               f"━━━━━━━━━━━━━━\n"
+               f"📈 近{test_len}期: {win_count/test_len*100:.1f}%\n"
+               f"🔥 连中: {streak} | 最大: {max_streak}\n"
+               f"⚙️ {info['params']}")
+        bot.edit_message_text(msg, chat_id, c.message.message_id, reply_markup=predict_refresh_keyboard(model_id))
         bot.answer_callback_query(c.id, "✅ 已刷新")
     except Exception as e:
         bot.answer_callback_query(c.id, f"错误: {e}", show_alert=True)
@@ -607,12 +619,12 @@ def cb_change(c): bot.answer_callback_query(c.id); bot.send_message(c.message.ch
 def show_rank(m):
     ranks = get_backtest_rank_top10()
     if not ranks: bot.send_message(m.chat.id, "❌ 数据不足"); return
-    txt = f"🏆 **TOP10 (近{ranks[0]['total']}期)**\n━━━━━━━━━━━━━━\n"
+    txt = f"🏆 TOP10 (近{ranks[0]['total']}期)\n━━━━━━━━━━━━━━\n"
     for i, r in enumerate(ranks):
         medal = ["🥇","🥈","🥉"][i] if i < 3 else f"{i+1}."
         note = "(双组)" if r["type"] == "双组" else "(杀组)"
         txt += f"{medal} #{r['id']} {r['name']}：{r['rate']:.1f}% {note}\n   🔥 最大: {r['streak']} | 当前: {r['current_streak']}\n"
-    bot.send_message(m.chat.id, txt, parse_mode="Markdown")
+    bot.send_message(m.chat.id, txt)
 
 def data_analysis(m):
     history, _, _ = get_global_clean_data()
@@ -628,8 +640,8 @@ def data_analysis(m):
     num_counter = Counter(all_nums)
     hot_nums = num_counter.most_common(5); cold_nums = num_counter.most_common()[:-6:-1]
     totals = [h["total"] for h in history[:20]]; avg_total = sum(totals) / len(totals)
-    txt = f"📈 **近20期走势**\n━━━━━━━━━━━━━━\n📊 形态:\n• 大单: {counter.get('大单',0)} ({counter.get('大单',0)/total*100:.1f}%)\n• 小单: {counter.get('小单',0)} ({counter.get('小单',0)/total*100:.1f}%)\n• 大双: {counter.get('大双',0)} ({counter.get('大双',0)/total*100:.1f}%)\n• 小双: {counter.get('小双',0)} ({counter.get('小双',0)/total*100:.1f}%)\n\n🔥 最大连号: {max_streak}期 ({recent_20[0]})\n📌 当前: {recent_20[0]}\n📊 均和: {avg_total:.1f}\n\n🔴 热号: {', '.join([str(n[0]) for n in hot_nums])}\n🔵 冷号: {', '.join([str(n[0]) for n in cold_nums])}"
-    bot.send_message(m.chat.id, txt, parse_mode="Markdown")
+    txt = f"📈 近20期走势\n━━━━━━━━━━━━━━\n📊 形态:\n• 大单: {counter.get('大单',0)} ({counter.get('大单',0)/total*100:.1f}%)\n• 小单: {counter.get('小单',0)} ({counter.get('小单',0)/total*100:.1f}%)\n• 大双: {counter.get('大双',0)} ({counter.get('大双',0)/total*100:.1f}%)\n• 小双: {counter.get('小双',0)} ({counter.get('小双',0)/total*100:.1f}%)\n\n🔥 最大连号: {max_streak}期 ({recent_20[0]})\n📌 当前: {recent_20[0]}\n📊 均和: {avg_total:.1f}\n\n🔴 热号: {', '.join([str(n[0]) for n in hot_nums])}\n🔵 冷号: {', '.join([str(n[0]) for n in cold_nums])}"
+    bot.send_message(m.chat.id, txt)
 
 @bot.message_handler(func=lambda m: m.text == "🔑 购买/续费卡密")
 def buy_panel(m): bot.send_message(m.chat.id, "💎 选择套餐", reply_markup=buy_keyboard())
