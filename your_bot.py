@@ -2,259 +2,365 @@ import requests
 import time
 import math
 import random
-import telebot
-from telebot import types
+from datetime import datetime
+from collections import Counter
 
-# ==================== [1] 核心锁定配置 ====================
-BOT_TOKEN = "你的Telegram机器人Token"
-IMG_LOGO = "https://s41.ax1x.com/2026/05/01/peTZHDU.jpg"
-IMG_WECHAT = "https://s41.ax1x.com/2026/05/01/peTZ7uT.jpg"
-IMG_ALIPAY = "https://s41.ax1x.com/2026/05/01/peTE1a9.jpg"
-CUSTOMER_SERVICE = "@woaimss"
-
-# API 地址
+# ==================== 全局公共配置（统一共用） ====================
+BOT_TOKEN = "8789627493:AAExE8z-tRhrbGvENYVt4dxqWUFf56rrZJQ"
+CHANNEL_IDS = ["@xx7273", "@zdbs1"]
 API_KJ = "https://pc28.help/api/kj.json?nbr=100"
 API_KENO = "https://pc28.help/api/keno.json?nbr=100"
 API_YL = "https://pc28.help/api/yl.json"
+API_MAP = {
+    "keno": "https://pc28.help/api/keno.json?nbr=100",
+    "kj": "https://pc28.help/api/kj.json?nbr=100",
+    "yl": "https://pc28.help/api/yl.json"
+}
+CATEGORIES = ["大单", "小单", "大双", "小双"]
+PREDICT_INTERVAL = 20
 
-# 卡密库（和你截图里的示例卡密匹配）
-CARD_DATABASE = ["xhs_vip_888"] + [f"xhsyj_{random.randint(1000000000, 9999999999)}" for _ in range(100)]
-authorized_users = {} 
+# ==================== 第一个算法 V8-HYBRID 逻辑原样完整 ====================
+class HybridEngineV8:
+    def __init__(self):
+        self.last_issue = None
+        self.weights = {"keno": 50.0, "yl": 3.0, "trend": 20.0}
 
-bot = telebot.TeleBot(BOT_TOKEN)
+    def fetch(self, url):
+        try: return requests.get(url, timeout=5).json().get("data", [])
+        except: return None
 
-# ==================== [2] 算法池 & 回测引擎 ====================
-def algo_v8_hybrid():
-    try:
-        keno = requests.get(API_KENO, timeout=5).json().get("data", [])
-        yl = requests.get(API_YL, timeout=5).json().get("data", {})
-        scores = {cat: 100.0 for cat in ["大单", "小单", "大双", "小双"]}
-        nbrs = [int(n) for n in keno[0]["nbrs"].split(",")]
-        p_val = sum([nbrs[i] for i in [1, 4, 7, 10, 13, 16]]) % 10
-        raw_map = ["小双", "小单", "小双", "小单", "小双", "大单", "大双", "大单", "大双", "大单"]
-        scores[raw_map[p_val]] += 55.0 
-        for cat in scores: scores[cat] += float(yl.get(cat, 0)) * 3.5 
-        res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        return res[0][0]
-    except: 
-        return "小双"
+    def calculate(self, keno_list, yl_dict, custom_weights):
+        scores = {cat: 100.0 for cat in CATEGORIES}
+        try:
+            nbrs = [int(n) for n in keno_list[0]["nbrs"].split(",")]
+            p_val = sum([nbrs[i] for i in [1, 4, 7, 10, 13, 16]]) % 10
+            raw_map = ["小双", "小单", "小双", "小单", "小双", "大单", "大双", "大单", "大双", "大单"]
+            scores[raw_map[p_val]] += custom_weights["keno"]
+        except: pass
 
-def algo_4d_pi(history):
-    try:
-        phi, latest = (1 + 5**0.5) / 2, history[0]
-        fixed_sum = sum(13 for _ in history[1:5]) 
-        raw = (fixed_sum * phi) / (latest["total"] * math.pi if latest["total"] > 0 else 1.5)
-        s = "{:.10f}".format(abs(raw - int(raw))).split('.')[1]
-        cat_map = {0:"小双", 1:"小单", 2:"小双", 3:"小单", 4:"小双", 5:"大单", 6:"大双", 7:"大单", 8:"大双", 9:"大单"}
-        return cat_map[int(s[0])]
-    except: 
-        return "大双"
+        if isinstance(yl_dict, dict):
+            for cat in CATEGORIES:
+                scores[cat] += float(yl_dict.get(cat, 0)) * custom_weights["yl"]
 
-def algo_v23_armor(history):
-    try:
-        recent_10 = [i["combination"] for i in history[:10]]
-        if recent_10[0] == recent_10[1]:
-            return {"大单":"小双", "小双":"大单", "大双":"小单", "小单":"大双"}[recent_10[0]]
-        return random.choice(["大单", "小单", "大双", "小双"])
-    except: 
-        return "小单"
+        sorted_res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return [sorted_res[0][0], sorted_res[1][0]], (sorted_res[0][1]/sum(scores.values()))
 
-def algo_5y_resonance(history):
-    try:
-        y_list = [int(sum(int(x) for x in i["number"].split("+")) % 5) for i in history[:15]]
-        diffs = [y_list[i] - y_list[i+1] for i in range(3)]
-        idx = int(round(y_list[0] + (sum(diffs)/3))) % 5
-        return "大单" if idx in [1,3] else "小双"
-    except: 
-        return "大单"
+    def self_optimize(self, keno, kj, yl):
+        best_w = self.weights.copy()
+        max_hits = -1
+        for k_w in [30, 55, 80]:
+            for y_w in [1.5, 3.5, 5.5]:
+                test_w = {"keno": k_w, "yl": y_w}
+                hits = 0
+                for i in range(1, 11):
+                    p, _ = self.calculate(keno[i:], yl, test_w)
+                    if kj[i-1]["combination"] in p: hits += 1
+                if hits > max_hits:
+                    max_hits = hits
+                    best_w = test_w
+        return best_w, max_hits
 
-def get_backtest_rank():
-    """计算近30期胜率排行"""
-    try:
-        raw_kj = requests.get(API_KJ).json().get("data", [])
-        for i in raw_kj: 
-            i["total"] = sum(int(x) for x in i["number"].split("+"))
-        algos = {
-            "V8": algo_v8_hybrid, 
-            "4D": lambda h: algo_4d_pi(h), 
-            "Armor": lambda h: algo_v23_armor(h), 
-            "5y": lambda h: algo_5y_resonance(h)
-        }
-        ranks = []
-        for name, func in algos.items():
-            win = sum(1 for i in range(1, 31) if func(raw_kj[i:]) == raw_kj[i-1]["combination"])
-            ranks.append({"name": name, "win": win, "rate": (win/30)*100})
-        return sorted(ranks, key=lambda x: x['win'], reverse=True)
-    except: 
-        return []
+    def run_once(self):
+        keno = self.fetch(API_MAP["keno"])
+        kj = self.fetch(API_MAP["kj"])
+        yl = requests.get(API_YL).json().get("data", {})
 
-# ==================== [3] 互动键盘设置（和截图完全一致） ====================
-def main_menu_keyboard():
-    """登录后的 6 功能全量互动键盘，和截图一模一样"""
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    kb.add("🔮 矩阵全量预测", "📊 算法胜率排行")
-    kb.add("📈 数据走势分析", "⚙️ 模型算法说明")
-    kb.add("🔑 购买/续费卡密", "👤 联系人工客服")
-    return kb
+        if not keno or not kj:
+            return None, None
+        curr_issue = str(keno[0].get("nbr"))
+        best_weights, recent_hits = self.self_optimize(keno, kj, yl)
+        dual_pred, conf = self.calculate(keno, yl, best_weights)
 
-def auth_keyboard():
-    mk = types.InlineKeyboardMarkup(row_width=2)
-    mk.add(
-        types.InlineKeyboardButton("🔑 购买授权", callback_data="buy_entry"),
-        types.InlineKeyboardButton("🔓 立即登录", callback_data="login_entry")
-    )
-    return mk
-
-def buy_keyboard():
-    """和截图完全一致的购买套餐按钮"""
-    mk = types.InlineKeyboardMarkup(row_width=1)
-    mk.add(
-        types.InlineKeyboardButton("🎫 天卡 - 5.88", callback_data="p_5.88"),
-        types.InlineKeyboardButton("📅 周卡 - 18.88", callback_data="p_18.88"),
-        types.InlineKeyboardButton("🌙 月卡 - 38.88", callback_data="p_38.88"),
-        types.InlineKeyboardButton("👑 永久卡 - 88.88", callback_data="p_88.88")
-    )
-    return mk
-
-# ==================== [4] 指令逻辑 ====================
-@bot.message_handler(commands=['start'])
-def welcome(m):
-    welcome_text = (
-        "**欢迎来到『小鶴神』矩阵终端 V16.0**\n"
-        "━━━━━━━━━━━━━━\n"
-        "本终端集成顶级 PC28 演算模型:\n"
-        "✅ **V8-Hybrid** 权重自我修正\n"
-        "✅ **PI+PHI 4D** 算力偏移模型\n"
-        "✅ **Armor V23** 形态装甲杀组\n"
-        "✅ **5y Resonance** 坐标锁定系统\n"
-        "━━━━━━━━━━━━━━\n"
-        "💡 请选择下方操作开始体验:"
-    )
-    if m.chat.id not in authorized_users:
-        bot.send_photo(m.chat.id, IMG_LOGO, caption=welcome_text, reply_markup=auth_keyboard(), parse_mode="Markdown")
-    else:
-        bot.send_message(m.chat.id, "✨ **小鶴神主控台已就绪**", reply_markup=main_menu_keyboard())
-
-@bot.message_handler(func=lambda m: m.text == "🔮 矩阵全量预测")
-def predict_dispatch(m):
-    if m.chat.id not in authorized_users:
-        bot.send_message(m.chat.id, "⚠️ 请先登录!", reply_markup=auth_keyboard())
-        return
-    
-    # 自动执行全量预测
-    try:
-        raw_kj = requests.get(API_KJ, timeout=5).json().get("data", [])
-        for i in raw_kj: 
-            i["total"] = sum(int(x) for x in i["number"].split("+"))
-        
-        ranks = get_backtest_rank()
-        res_v8 = algo_v8_hybrid()
-        res_4d = algo_4d_pi(raw_kj)
-        
         msg = (
-            f"🔮 **小鶴神矩阵全量预测 ({int(raw_kj[0]['nbr'])+1} 期)**\n"
+            f"⚡ <b>逻辑跳跃引擎 (V8-HYBRID)</b>\n"
             f"━━━━━━━━━━━━━━\n"
-            f"🏆 **最优推荐:** `算法 {ranks[0]['name']}`\n"
-            f"🎯 **预测形态:** 【 **{res_v8 if 'V8' in ranks[0]['name'] else res_4d}** 】\n\n"
-            f"📡 **全量细节:**\n"
-            f"• V8-Hybrid: `{res_v8}`\n"
-            f"• 4D-PI+PHI: `{res_4d}`\n"
-            f"• Armor 杀: `{algo_v23_armor(raw_kj)}`\n"
-            f"• 5y 共振: `{algo_5y_resonance(raw_kj)}`\n"
+            f"📡 开奖:{curr_issue}期 → <b>{kj[0]['combination']}</b>\n"
+            f"🎯 预测:{int(curr_issue)+1}期\n\n"
+            f"🔥 核心推荐:<b>{dual_pred[0]} + {dual_pred[1]}</b>\n"
+            f"🚦 信心评级:{'⭐' * (recent_hits // 2 if recent_hits > 4 else 2)}\n"
             f"━━━━━━━━━━━━━━\n"
-            f"📈 状态:`算法同步完成`"
+            f"📈 动态回测胜率:{recent_hits * 10}%\n"
+            f"🧠 逻辑:实时权重修正 (非遗传)\n"
+            f"🛠️ 模式:{'偏向物理' if best_weights['keno'] > 60 else '偏向遗漏'}\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"💡 建议:当前胜率已根据近10期自动校准。"
         )
-        bot.send_message(m.chat.id, msg, parse_mode="Markdown")
+        return curr_issue, msg
+
+# ==================== 第二个算法 4D双组权重优化 原样完整 ====================
+def get_category(total):
+    size = "大" if total >= 14 else "小"
+    oe = "单" if total % 2 == 1 else "双"
+    return size + oe
+
+def get_latest_data():
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        resp = requests.get(API_KJ, headers=headers, timeout=15)
+        res_json = resp.json()
+        items = res_json.get("data", [])
+        if not items:
+            return [], []
+        history = []
+        all_codes = []
+        for item in items:
+            issue = str(item.get("nbr", ""))
+            raw_num = item.get("number", "")
+            combo = item.get("combination", "")
+            if not issue or not raw_num:
+                continue
+            try:
+                nums = [int(n) for n in raw_num.split('+')]
+                total = int(item.get("num", sum(nums)))
+                all_codes.extend(nums)
+                if not combo:
+                    combo = get_category(total)
+                history.append({
+                    "issue": issue,
+                    "total": total,
+                    "category": combo,
+                    "codes": nums
+                })
+            except:
+                continue
+        return history, all_codes
     except Exception as e:
-        print(e)
-        bot.send_message(m.chat.id, "❌ 演算链路故障")
+        print(f"❌ 数据获取失败: {e}")
+        return [], []
 
-@bot.message_handler(func=lambda m: m.text == "📊 算法胜率排行")
-def show_rank(m):
-    if m.chat.id not in authorized_users: 
-        return
-    ranks = get_backtest_rank()
-    if not ranks:
-        bot.send_message(m.chat.id, "❌ 获取排行失败，请稍后再试")
-        return
-    txt = "🏆 **近 30 期算法胜率榜**\n━━━━━━━━━━━━━━\n"
-    for i, r in enumerate(ranks):
-        medal = ["🥇", "🥈", "🥉", "🎖️"][i]
-        txt += f"{medal} **{r['name']}**: `{r['rate']:.1f}%` ({r['win']}/30)\n"
-    bot.send_message(m.chat.id, txt, parse_mode="Markdown")
+def predict_with_params(history, params):
+    if len(history) < 5: return None
+    latest = history[0]
+    last4 = history[1:5]
+    phi = (1 + 5**0.5) / 2
+    fixed_sum = sum(params.get(h["category"], 13) for h in last4)
+    raw = (fixed_sum * phi) / (latest["total"] * math.pi if latest["total"] > 0 else 1.5)
+    decimal_part = abs(raw - int(raw))
+    s = "{:.10f}".format(decimal_part).split('.')[1]
+    t1, t2 = int(s[0]), int(s[1])
+    cat_map = {0:"小双", 1:"小单", 2:"小双", 3:"小单", 4:"小双", 5:"大单", 6:"大双", 7:"大单", 8:"大双", 9:"大单"}
+    opp = {"大单":"小单", "大双":"小双", "小单":"大单", "小双":"大双"}
+    c1 = cat_map[t1]
+    c2 = cat_map[t2]
+    if c1 == c2: c2 = opp[c1]
+    return [c1, c2]
 
-@bot.message_handler(func=lambda m: m.text == "📈 数据走势分析")
-def data_analysis(m):
-    if m.chat.id not in authorized_users:
-        bot.send_message(m.chat.id, "⚠️ 请先登录!", reply_markup=auth_keyboard())
-        return
-    bot.send_message(m.chat.id, "📈 **数据走势分析功能**\n该功能正在维护中，敬请期待！")
+def find_best_params(history):
+    ranges = {"大单":range(10,18),"小单":range(10,18),"大双":range(11,19),"小双":range(11,19)}
+    best_p = {"大单":12,"小单":13,"大双":14,"小双":15}
+    best_score = -1
+    for _ in range(60):
+        ps = {k: random.choice(v) for k, v in ranges.items()}
+        current_score = 0
+        for i in range(min(len(history)-5, 12)):
+            test_history = history[i+1:i+7]
+            actual = history[i]["category"]
+            pred = predict_with_params(test_history, ps)
+            if pred and actual in pred:
+                current_score += (1 / (i + 1))
+        if current_score > best_score:
+            best_score = current_score
+            best_p = ps
+    return best_p
 
-@bot.message_handler(func=lambda m: m.text == "⚙️ 模型算法说明")
-def algo_explain(m):
-    if m.chat.id not in authorized_users:
-        bot.send_message(m.chat.id, "⚠️ 请先登录!", reply_markup=auth_keyboard())
-        return
-    explain_text = (
-        "⚙️ **模型算法说明**\n"
-        "━━━━━━━━━━━━━━\n"
-        "✅ **V8-Hybrid**: 多维度权重自我修正模型\n"
-        "✅ **4D-PI+PHI**: 基于黄金分割与圆周率的算力偏移模型\n"
-        "✅ **Armor V23**: 形态装甲杀组模型\n"
-        "✅ **5y Resonance**: 周期坐标锁定系统\n"
-        "━━━━━━━━━━━━━━\n"
-        "⚠️ 算法胜率仅为历史回测参考，不构成投资建议"
-    )
-    bot.send_message(m.chat.id, explain_text, parse_mode="Markdown")
+# ==================== 第三个算法 V23-ARMOR 形态装甲 原样完整 ====================
+class ArmorSlayer:
+    def __init__(self):
+        self.last_issue = None
 
-@bot.message_handler(func=lambda m: m.text == "🔑 购买/续费卡密")
-def buy_panel(m):
-    bot.send_message(m.chat.id, "💎 **请选择授权套餐:**", reply_markup=buy_keyboard())
+    def calculate_form_v23(self, history):
+        recent_10 = [i["combination"] for i in history[:10]]
+        recent_40 = [i["combination"] for i in history[:40]]
+        counts_40 = Counter(recent_40)
+        curr_form = recent_10[0]
+        prev_form = recent_10[1]
+        forms = ["大单", "小单", "大双", "小双"]
 
-@bot.message_handler(func=lambda m: m.text == "👤 联系人工客服")
-def kf(m):
-    bot.send_message(m.chat.id, f"👤 **官方客服通道**\n\n如有支付问题或大额充值,请联系: {CUSTOMER_SERVICE}")
+        if curr_form == prev_form:
+            opposites = {"大单":"小双", "小双":"大单", "大双":"小单", "小单":"大双"}
+            slay_target = opposites[curr_form]
+        elif len(set(recent_10[:5])) >= 3:
+            slay_target = sorted(forms, key=lambda x: abs(counts_40[x] - 10))[0]
+        else:
+            omissions = {}
+            for f in forms:
+                try: omissions[f] = recent_40.index(f)
+                except: omissions[f] = 40
+            slay_target = sorted(omissions, key=omissions.get, reverse=True)[0]
+        return slay_target
 
-# ==================== [5] 支付与回调 ====================
-@bot.callback_query_handler(func=lambda c: c.data == "login_entry")
-def cb_login(c):
-    bot.answer_callback_query(c.id)
-    bot.send_message(c.message.chat.id, "⌨️ 请在下方输入 `xhs` 开头的卡密:")
+    def get_reason(self, data):
+        return self.calculate_form_v23(data)
 
-@bot.message_handler(func=lambda m: m.text.startswith("xhs"))
-def auth_proc(m):
-    if m.text.strip() in CARD_DATABASE:
-        authorized_users[m.chat.id] = m.text.strip()
-        bot.send_message(m.chat.id, "✅ **登录成功,主控台已开启。**", reply_markup=main_menu_keyboard())
-    else:
-        bot.send_message(m.chat.id, "❌ 卡密无效!")
+    def run_once(self):
+        try:
+            resp = requests.get(API_KJ, timeout=8).json()
+            data = resp.get("data", [])
+            if not data:
+                return None, None
+            curr_issue = str(data[0]["nbr"])
+            slay_result = self.calculate_form_v23(data)
+            hits = 0
+            for k in range(1, 16):
+                if data[k-1]["combination"] != self.calculate_form_v23(data[k:]):
+                    hits += 1
+            rate = (hits / 15) * 100
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("p_"))
-def cb_pay_select(c):
-    bot.answer_callback_query(c.id)
-    price = c.data.split("_")[1]
-    mk = types.InlineKeyboardMarkup()
-    mk.add(
-        types.InlineKeyboardButton("微信支付", callback_data=f"qr_wx_{price}"),
-        types.InlineKeyboardButton("支付宝支付", callback_data=f"qr_ali_{price}")
-    )
-    bot.edit_message_text(f"💰 待支付: {price} 元\n请选择支付通道:", c.message.chat.id, c.message.message_id, reply_markup=mk)
+            msg = (
+                f"🛡️ <b>形态级反向杀组 (V23-ARMOR)</b>\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"📡 上期:{curr_issue}期 → <b>{data[0]['combination']}</b>\n\n"
+                f"🚫 <b>下期必杀:【 {slay_result} 】</b>\n"
+                f"📝 理由:{self.get_reason(data)}\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"📈 <b>形态排除成功率:{rate:.1f}%</b>\n"
+                f"🛡️ <b>风险等级:{'极低' if rate >= 86 else '一般'}</b>\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💡 逻辑:长龙保护 + 属性对冲算法"
+            )
+            return curr_issue, msg
+        except Exception as e:
+            print(e)
+            return None, None
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("qr_"))
-def cb_send_qr(c):
-    bot.answer_callback_query(c.id)
-    _, method, price = c.data.split("_")
-    qr = IMG_WECHAT if method == "wx" else IMG_ALIPAY
-    mk = types.InlineKeyboardMarkup()
-    mk.add(types.InlineKeyboardButton("✅ 我已支付 (发送截图)", callback_data="conf_pay"))
-    bot.delete_message(c.message.chat.id, c.message.message_id)
-    bot.send_photo(c.message.chat.id, qr, caption=f"🎯 **扫码支付: {price} 元**\n完成后请联系客服核实卡密。", reply_markup=mk)
+# ==================== 第四个算法 5y属性共振 原样完整 ====================
+five_y_table = {
+    "5y0": [20, 15, 25, 5, 10],
+    "5y1": [1, 11, 21, 6, 16, 26],
+    "5y2": [2, 12, 22, 7, 17, 27],
+    "5y3": [13, 23, 3, 8, 18],
+    "5y4": [14, 24, 4, 19, 9]
+}
 
-@bot.callback_query_handler(func=lambda c: c.data == "conf_pay")
-def cb_conf(c):
-    bot.answer_callback_query(c.id, "已记录,请发截图", show_alert=True)
-    bot.send_message(c.message.chat.id, f"👤 **请发送截图至:** {CUSTOMER_SERVICE}")
+def get_comb(n):
+    is_big = n >= 14
+    is_odd = n % 2 != 0
+    return ("大" if is_big else "小") + ("单" if is_odd else "双")
+
+FIVE_Y_PROPERTIES = {k: Counter([get_comb(n) for n in nums]) for k, nums in five_y_table.items()}
+
+class Resonance5yEngine:
+    def __init__(self):
+        self.last_issue = None
+
+    def predict_logic(self, history):
+        y_list = [int(sum(int(x) for x in i["number"].split("+")) % 5) for i in history[:15]]
+        diffs = [y_list[i] - y_list[i+1] for i in range(len(y_list)-1)]
+        avg_diff = sum(diffs[:3]) / 3
+        pred_y_idx = int(round(y_list[0] + avg_diff)) % 5
+        pred_y_key = f"5y{pred_y_idx}"
+        recent_global_combs = Counter([i["combination"] for i in history[:20]])
+        group_combs = FIVE_Y_PROPERTIES[pred_y_key]
+        resonance_scores = {}
+        for comb in ["大单", "小单", "大双", "小双"]:
+            resonance_scores[comb] = group_combs[comb] * (recent_global_combs[comb] + 2)
+        top_two = sorted(resonance_scores.items(), key=lambda x: x[1], reverse=True)[:2]
+        return pred_y_key, [top_two[0][0], top_two[1][0]]
+
+    def run_once(self):
+        try:
+            resp = requests.get(API_KJ, timeout=8).json()
+            data = resp.get("data", [])
+            if not data:
+                return None, None
+            curr_issue = str(data[0]["nbr"])
+            pred_5y, pred_dual = self.predict_logic(data)
+            hits = 0
+            for j in range(1, 11):
+                _, d = self.predict_logic(data[j:])
+                if data[j-1]["combination"] in d: hits += 1
+
+            msg = (
+                f"🌀 <b>5y属性共振推演 (V18.1-FIX)</b>\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"📡 开奖:{curr_issue}期 → <b>{data[0]['combination']}</b>\n"
+                f"🎯 <b>下期预测:{int(curr_issue)+1}期</b>\n\n"
+                f"🧭 5y坐标:<b>{pred_5y}</b>\n"
+                f"🔥 核心推荐:<b>{pred_dual[0]} + {pred_dual[1]}</b>\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"📈 近10期共振胜率:{hits * 10}%\n"
+                f"🧠 逻辑:漂移修正 + 索引锁定\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💡 提示:错误已修复,预测轨道已强制对齐。"
+            )
+            return curr_issue, msg
+        except Exception as e:
+            print(f"运行异常: {e}")
+            return None, None
+
+# ==================== 统一推送公共函数 ====================
+def send_tg_text(text, parse_mode="HTML"):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    for cid in CHANNEL_IDS:
+        try:
+            requests.post(url, json={
+                "chat_id": cid,
+                "text": text,
+                "parse_mode": parse_mode
+            }, timeout=10)
+        except:
+            pass
+
+# ==================== 主程序统一轮询（本地运行 不碰GitHub） ====================
+def main():
+    print("🚀 四算法合一 本地启动成功（不触碰GitHub）")
+    # 实例化四个算法
+    v8_engine = HybridEngineV8()
+    armor_engine = ArmorSlayer()
+    fivey_engine = Resonance5yEngine()
+
+    last_issue_all = None
+    stats = {"hit": 0, "total": 0}
+    history_lines = []
+    pending_prediction = None
+
+    while True:
+        # 1. V8算法推送
+        curr_v8, msg_v8 = v8_engine.run_once()
+        if curr_v8 and curr_v8 != last_issue_all:
+            send_tg_text(msg_v8)
+
+        # 2. 形态装甲V23推送
+        curr_armor, msg_armor = armor_engine.run_once()
+        if curr_armor and curr_armor != last_issue_all:
+            send_tg_text(msg_armor)
+
+        # 3. 5y共振推送
+        curr_fivey, msg_fivey = fivey_engine.run_once()
+        if curr_fivey and curr_fivey != last_issue_all:
+            send_tg_text(msg_fivey)
+
+        # 4. 4D双组算法独立运行
+        history, _ = get_latest_data()
+        if history:
+            current_issue = history[0]["issue"]
+            if current_issue != last_issue_all:
+                print(f"🔔 4D算法期号更新: {current_issue}")
+                if pending_prediction and pending_prediction["issue"] == current_issue:
+                    actual_cat = history[0]["category"]
+                    is_hit = actual_cat in pending_prediction["pred"]
+                    stats["total"] += 1
+                    if is_hit: stats["hit"] += 1
+
+                best_p = find_best_params(history)
+                pred = predict_with_params(history, best_p)
+                if pred:
+                    next_issue = str(int(current_issue) + 1)
+                    show_pred = f"{pred[0]}+{pred[1]}"
+                    pending_prediction = {"issue": next_issue, "pred": pred, "show_pred": show_pred}
+                    rate = (stats["hit"] / stats["total"] * 100) if stats["total"] > 0 else 0
+                    now_str = datetime.now().strftime('%H:%M:%S')
+                    msg_4d = (
+                        f"🔮 *双组优选预测* (第 `{current_issue}` 期)\n"
+                        f"———————————————\n"
+                        f"🎯 下期建议: `{show_pred}`\n"
+                        f"📈 历史胜率: `{rate:.1f}% ({stats['hit']}/{stats['total']})`\n"
+                        f"⏰ 预测时间: {now_str}"
+                    )
+                    send_tg_text(msg_4d, parse_mode="Markdown")
+                last_issue_all = current_issue
+
+        time.sleep(25)
 
 if __name__ == "__main__":
-    print("🚀 小鶴神终端 V16.0 巡航中...")
-    bot.infinity_polling()
+    main()
