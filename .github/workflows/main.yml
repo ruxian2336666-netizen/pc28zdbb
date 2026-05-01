@@ -1,0 +1,25 @@
+name: 24h-Matrix-Bot
+
+on:
+  workflow_dispatch:      # 允许你手动点击“开始”
+  schedule:
+    - cron: '0 */6 * * *'  # 每6小时自动强制重启，防止GitHub杀掉超长进程
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查代码
+        uses: actions/checkout@v3
+
+      - name: 安装 Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: 安装依赖库
+        run: pip install pyTelegramBotAPI requests
+
+      - name: 运行机器人
+        # 使用 timeout 确保在 6 小时限制前安全退出，配合上面的 cron 实现无缝衔接
+        run: timeout 5h50m python your_bot.py || true 
