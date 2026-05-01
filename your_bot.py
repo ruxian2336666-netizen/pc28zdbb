@@ -18,14 +18,11 @@ API_KJ = "https://pc28.help/api/kj.json?nbr=100"
 API_KENO = "https://pc28.help/api/keno.json?nbr=100"
 API_YL = "https://pc28.help/api/yl.json"
 
-# 卡密库
 CARD_DATABASE = ["xhs_vip_888"] + [f"xhsyj_{random.randint(1000000000, 9999999999)}" for _ in range(100)]
 authorized_users = {}
 
-# 用户选择的算法
 user_algo_choice = {}
 
-# 全局缓存
 global_kj_cache = []
 global_keno_cache = []
 global_yl_cache = {}
@@ -33,6 +30,7 @@ last_fetch_time = 0
 FETCH_INTERVAL = random.randint(25, 35)
 
 bot = telebot.TeleBot(BOT_TOKEN)
+
 
 # ==================== 数据获取 ====================
 def get_global_clean_data():
@@ -165,7 +163,7 @@ def algo_4d_pi(history):
 def algo_v23_armor(history):
     try:
         if len(history) < 15:
-            return ["小单"], "未知"
+            return ["小单"], "数据不足"
 
         recent_10 = [i["combination"] for i in history[:10]]
         recent_40 = [i["combination"] for i in history[:min(40, len(history))]]
@@ -194,7 +192,7 @@ def algo_v23_armor(history):
 
         return [slay], reason
     except:
-        return ["小单"], "未知"
+        return ["小单"], "数据异常"
 
 
 # ==================== 算法4：5y Resonance 双组 ====================
@@ -249,30 +247,51 @@ def get_backtest_rank():
         return []
 
     test_len = min(25, len(history) - 1)
-
-    algos = {
-        "V8-Hybrid": lambda h: algo_v8_hybrid(h, keno, yl)[0],
-        "4D-PI+PHI": algo_4d_pi,
-        "Armor V23": lambda h: algo_v23_armor(h)[0],
-        "5y Resonance": algo_5y_resonance
-    }
-
     ranks = []
-    for name, func in algos.items():
-        win = 0
-        total = 0
-        for i in range(1, test_len + 1):
-            try:
-                pred = func(history[i:])
-                real = history[i - 1]["combination"]
-                if real in pred:
-                    win += 1
-                total += 1
-            except:
-                continue
-        if total > 0:
-            rate = (win / total) * 100
-            ranks.append({"name": name, "win": win, "total": total, "rate": rate})
+
+    # V8-Hybrid 双组回测
+    win = 0
+    for i in range(1, test_len + 1):
+        try:
+            dual, _ = algo_v8_hybrid(history[i:], keno, yl)
+            if history[i - 1]["combination"] in dual:
+                win += 1
+        except:
+            continue
+    ranks.append({"name": "V8-Hybrid 双组", "win": win, "total": test_len, "rate": (win / test_len) * 100, "type": "双组"})
+
+    # 4D-PI+PHI 双组回测
+    win = 0
+    for i in range(1, test_len + 1):
+        try:
+            dual = algo_4d_pi(history[i:])
+            if history[i - 1]["combination"] in dual:
+                win += 1
+        except:
+            continue
+    ranks.append({"name": "4D-PI+PHI 双组", "win": win, "total": test_len, "rate": (win / test_len) * 100, "type": "双组"})
+
+    # Armor V23 杀组回测
+    win = 0
+    for i in range(1, test_len + 1):
+        try:
+            slay, _ = algo_v23_armor(history[i:])
+            if history[i - 1]["combination"] != slay[0]:
+                win += 1
+        except:
+            continue
+    ranks.append({"name": "Armor V23 杀组", "win": win, "total": test_len, "rate": (win / test_len) * 100, "type": "杀组"})
+
+    # 5y Resonance 双组回测
+    win = 0
+    for i in range(1, test_len + 1):
+        try:
+            dual = algo_5y_resonance(history[i:])
+            if history[i - 1]["combination"] in dual:
+                win += 1
+        except:
+            continue
+    ranks.append({"name": "5y Resonance 双组", "win": win, "total": test_len, "rate": (win / test_len) * 100, "type": "双组"})
 
     return sorted(ranks, key=lambda x: x["win"], reverse=True)
 
@@ -398,9 +417,19 @@ def cb_start_predict(c):
 
     bot.delete_message(chat_id, c.message.message_id)
 
+    # 回测近25期
+    test_len = min(25, len(history) - 1)
+
     if algo_num == 1:
-        # V8-Hybrid 双组
         dual, hits = algo_v8_hybrid(history, keno, yl)
+        win_count = 0
+        for i in range(1, test_len + 1):
+            try:
+                d, _ = algo_v8_hybrid(history[i:], keno, yl)
+                if history[i - 1]["combination"] in d:
+                    win_count += 1
+            except:
+                continue
         msg = (
             f"⚡ **V8-Hybrid 双组预测**\n"
             f"━━━━━━━━━━━━━━\n"
@@ -408,28 +437,44 @@ def cb_start_predict(c):
             f"🎯 预测: {next_issue}期\n\n"
             f"🔥 双组推荐: 【 **{dual[0]} + {dual[1]}** 】\n"
             f"🚦 近10期命中: {hits}次\n"
+            f"📈 近{test_len}期胜率: {win_count}/{test_len} ({win_count/test_len*100:.1f}%)\n"
             f"🛠️ 模式: 权重自我修正\n"
             f"━━━━━━━━━━━━━━\n"
             f"💡 双组命中即算对"
         )
 
     elif algo_num == 2:
-        # 4D-PI+PHI 双组
         dual = algo_4d_pi(history)
+        win_count = 0
+        for i in range(1, test_len + 1):
+            try:
+                d = algo_4d_pi(history[i:])
+                if history[i - 1]["combination"] in d:
+                    win_count += 1
+            except:
+                continue
         msg = (
             f"🔮 **4D-PI+PHI 双组预测**\n"
             f"━━━━━━━━━━━━━━\n"
             f"📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n"
             f"🎯 预测: {next_issue}期\n\n"
             f"🔥 双组推荐: 【 **{dual[0]} + {dual[1]}** 】\n"
+            f"📈 近{test_len}期胜率: {win_count}/{test_len} ({win_count/test_len*100:.1f}%)\n"
             f"🧠 逻辑: 黄金分割+圆周率算力偏移\n"
             f"━━━━━━━━━━━━━━\n"
             f"💡 双组命中即算对"
         )
 
     elif algo_num == 3:
-        # Armor V23 杀组
         slay, reason = algo_v23_armor(history)
+        win_count = 0
+        for i in range(1, test_len + 1):
+            try:
+                s, _ = algo_v23_armor(history[i:])
+                if history[i - 1]["combination"] != s[0]:
+                    win_count += 1
+            except:
+                continue
         msg = (
             f"🛡️ **Armor V23 杀组预测**\n"
             f"━━━━━━━━━━━━━━\n"
@@ -437,18 +482,27 @@ def cb_start_predict(c):
             f"🎯 预测: {next_issue}期\n\n"
             f"🚫 下期必杀: 【 **{slay[0]}** 】\n"
             f"📝 理由: {reason}\n"
+            f"📈 近{test_len}期杀对率: {win_count}/{test_len} ({win_count/test_len*100:.1f}%)\n"
             f"━━━━━━━━━━━━━━\n"
-            f"💡 杀掉该形态，排除一项"
+            f"💡 排除该形态，剩下3选1"
         )
 
     elif algo_num == 4:
-        # 5y Resonance 双组
         dual = algo_5y_resonance(history)
+        win_count = 0
+        for i in range(1, test_len + 1):
+            try:
+                d = algo_5y_resonance(history[i:])
+                if history[i - 1]["combination"] in d:
+                    win_count += 1
+            except:
+                continue
         y_list = []
         for i in history[:15]:
             nums = i.get("nums", [int(x) for x in i["number"].split("+")])
             y_list.append(sum(nums) % 5)
-        pred_y_idx = int(round(y_list[0] + sum([y_list[i] - y_list[i+1] for i in range(min(3, len(y_list)-1))]) / 3)) % 5
+        diffs = [y_list[i] - y_list[i + 1] for i in range(min(3, len(y_list) - 1))]
+        pred_y_idx = int(round(y_list[0] + sum(diffs) / len(diffs))) % 5 if diffs else 0
 
         msg = (
             f"🌀 **5y Resonance 双组预测**\n"
@@ -457,6 +511,7 @@ def cb_start_predict(c):
             f"🎯 预测: {next_issue}期\n\n"
             f"🧭 5y坐标: 5y{pred_y_idx}\n"
             f"🔥 双组推荐: 【 **{dual[0]} + {dual[1]}** 】\n"
+            f"📈 近{test_len}期胜率: {win_count}/{test_len} ({win_count/test_len*100:.1f}%)\n"
             f"🧠 逻辑: 漂移修正+属性共振\n"
             f"━━━━━━━━━━━━━━\n"
             f"💡 双组命中即算对"
@@ -478,8 +533,9 @@ def show_rank(m):
     txt = f"🏆 **近{ranks[0]['total']}期算法胜率榜单**\n━━━━━━━━━━━━━━\n"
     for i, r in enumerate(ranks):
         medal = ["🥇", "🥈", "🥉", "🎖️"][i] if i < 4 else "📊"
-        txt += f"{medal} {r['name']}：{r['rate']:.1f}% ({r['win']}/{r['total']})\n"
-    txt += "━━━━━━━━━━━━━━\n⚠️ 双组命中即算对，历史仅作参考"
+        note = "(双组命中)" if r["type"] == "双组" else "(杀对立)"
+        txt += f"{medal} {r['name']}：{r['rate']:.1f}% ({r['win']}/{r['total']}) {note}\n"
+    txt += "━━━━━━━━━━━━━━\n⚠️ 杀组排除1项=75%理论，双组=50%理论"
     bot.send_message(m.chat.id, txt, parse_mode="Markdown")
 
 
@@ -554,7 +610,7 @@ def algo_explain(m):
         "3️⃣ Armor V23 杀组预测\n"
         "三策略杀组：长龙杀对立\n"
         "震荡杀最稳 / 极冷拦截\n"
-        "排除一个形态，非双组推荐\n\n"
+        "排除一个形态，剩下3选1\n\n"
         "4️⃣ 5y Resonance 双组预测\n"
         "5y坐标漂移+属性共振锁定\n"
         "━━━━━━━━━━━━━━\n"
