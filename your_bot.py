@@ -77,9 +77,8 @@ API_KJ = "https://pc28.help/api/kj.json?nbr=100"
 API_KENO = "https://pc28.help/api/keno.json?nbr=100"
 API_YL = "https://pc28.help/api/yl.json"
 
-CARD_DATABASE = ["xhs_vip_888"] + [f"xhsyj_{random.randint(1000000000, 9999999999)}" for _ in range(100)]
+CARD_DATABASE = ["xhs_vip_888"]
 authorized_users = {}
-
 user_algo_choice = {}
 
 global_kj_cache = []
@@ -147,7 +146,7 @@ def get_global_clean_data():
 def algo_v8_hybrid(history, keno_data, yl_data):
     try:
         if not keno_data or len(keno_data) < 15:
-            return ["小双", "小单"], 0
+            return ["小双", "小单"]
         best_w = {"keno": 55, "yl": 3.5}
         max_hits = -1
         for k_w in [35, 55, 75]:
@@ -181,9 +180,9 @@ def algo_v8_hybrid(history, keno_data, yl_data):
         for cat in scores:
             scores[cat] += float(yl_data.get(cat, 0)) * best_w["yl"]
         sorted_res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        return [sorted_res[0][0], sorted_res[1][0]], max_hits
+        return [sorted_res[0][0], sorted_res[1][0]]
     except:
-        return ["小双", "小单"], 0
+        return ["小双", "小单"]
 
 
 def algo_4d_pi(history):
@@ -249,9 +248,7 @@ def algo_5y_resonance(history):
             4: [14, 24, 4, 19, 9]
         }
         def get_comb(n):
-            size = "大" if n >= 14 else "小"
-            oe = "单" if n % 2 != 0 else "双"
-            return size + oe
+            return ("大" if n >= 14 else "小") + ("单" if n % 2 != 0 else "双")
         five_y_props = {}
         for k, nums in five_y_table.items():
             five_y_props[k] = Counter([get_comb(n) for n in nums])
@@ -273,7 +270,7 @@ def algo_5y_resonance(history):
         return ["大单", "小双"]
 
 
-# ==================== 动态生成100个双组模型 + 100个杀组模型 ====================
+# ==================== 204个模型 ====================
 def generate_dual_models():
     models = {}
     all_forms = ["大单", "小单", "大双", "小双"]
@@ -286,15 +283,15 @@ def generate_dual_models():
         mix_mode = random.choice(["keno_first", "yl_first", "balanced", "random_mix"])
         use_opposite = random.choice([True, False])
         
-        def make_dual_model(k_w_, y_w_, base_score_, mix_mode_, use_opposite_):
+        def make_dual_model(k_w, y_w, base_score, mix_mode, use_opposite):
             def dual_model(history, keno_data, yl_data):
                 try:
                     if not keno_data or len(keno_data) < 2:
                         return [random.choice(all_forms), random.choice(all_forms)]
                     
-                    scores = {cat: float(base_score_) for cat in all_forms}
+                    scores = {cat: float(base_score) for cat in all_forms}
                     
-                    if mix_mode_ in ["keno_first", "balanced", "random_mix"]:
+                    if mix_mode in ["keno_first", "balanced", "random_mix"]:
                         try:
                             nbrs_str = keno_data[0].get("nbrs", "")
                             if nbrs_str:
@@ -309,14 +306,14 @@ def generate_dual_models():
                                 if idx_list:
                                     p_val = sum([nbrs[i] for i in idx_list]) % 10
                                     raw_map = ["小双", "小单", "小双", "小单", "小双", "大单", "大双", "大单", "大双", "大单"]
-                                    scores[raw_map[p_val]] += k_w_
+                                    scores[raw_map[p_val]] += k_w
                         except:
                             pass
                     
-                    if mix_mode_ in ["yl_first", "balanced"]:
+                    if mix_mode in ["yl_first", "balanced"]:
                         for cat in all_forms:
                             try:
-                                scores[cat] += float(yl_data.get(cat, 0)) * y_w_
+                                scores[cat] += float(yl_data.get(cat, 0)) * y_w
                             except:
                                 pass
                     
@@ -328,7 +325,7 @@ def generate_dual_models():
                     sorted_res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
                     dual = [sorted_res[0][0], sorted_res[1][0]]
                     
-                    if use_opposite_ and dual[0] == dual[1]:
+                    if use_opposite and dual[0] == dual[1]:
                         opp = {"大单": "小单", "大双": "小双", "小单": "大单", "小双": "大双"}
                         dual[1] = opp.get(dual[0], random.choice([c for c in all_forms if c != dual[0]]))
                     
@@ -337,14 +334,13 @@ def generate_dual_models():
                     return [random.choice(all_forms), random.choice(all_forms)]
             return dual_model
         
-        model_name = f"双组M{model_id}"
         models[model_id] = {
-            "func": make_dual_model(k_w, y_w, base_score, mix_mode, use_opposite_),
+            "func": make_dual_model(k_w, y_w, base_score, mix_mode, use_opposite),
             "info": {
                 "id": model_id,
-                "name": model_name,
+                "name": f"双组M{model_id}",
                 "type": "双组",
-                "params": f"K:{k_w} Y:{y_w} B:{base_score} M:{mix_mode} O:{use_opposite_}"
+                "params": f"K:{k_w} Y:{y_w} B:{base_score} M:{mix_mode} O:{use_opposite}"
             }
         }
     
@@ -362,17 +358,17 @@ def generate_slay_models():
         lookback = random.choice([5, 10, 15, 20, 25, 30, 35, 40])
         threshold = random.choice([2, 3, 4, 5])
         
-        def make_slay_model(strategy_, lookback_, threshold_):
+        def make_slay_model(strategy, lookback, threshold):
             def slay_model(history):
                 try:
-                    if len(history) < lookback_ + 2:
+                    if len(history) < lookback + 2:
                         return [random.choice(all_forms)], "数据不足"
                     
-                    recent = [i["combination"] for i in history[:lookback_]]
+                    recent = [i["combination"] for i in history[:lookback]]
                     counts = Counter(recent)
                     curr = recent[0]
                     
-                    if strategy_ == "long_dragon":
+                    if strategy == "long_dragon":
                         if len(recent) >= 2 and recent[0] == recent[1]:
                             slay = opposites.get(curr, random.choice(all_forms))
                             reason = f"长龙{curr}，杀对立{slay}"
@@ -380,24 +376,24 @@ def generate_slay_models():
                             slay = curr
                             reason = f"无长龙，杀当前{slay}"
                     
-                    elif strategy_ == "cold_hunt":
+                    elif strategy == "cold_hunt":
                         slay = sorted(all_forms, key=lambda x: counts.get(x, 0))[0]
                         reason = f"杀最冷{slay}({counts.get(slay,0)}次)"
                     
-                    elif strategy_ == "hot_avoid":
+                    elif strategy == "hot_avoid":
                         slay = sorted(all_forms, key=lambda x: counts.get(x, 0), reverse=True)[0]
                         reason = f"避热杀{slay}({counts.get(slay,0)}次)"
                     
-                    elif strategy_ == "cycle_kill":
-                        cycle_idx = (len(history) // max(threshold_, 1)) % 4
+                    elif strategy == "cycle_kill":
+                        cycle_idx = (len(history) // max(threshold, 1)) % 4
                         slay = all_forms[cycle_idx]
                         reason = f"周期轮杀{slay}"
                     
-                    elif strategy_ == "random_avoid":
+                    elif strategy == "random_avoid":
                         slay = random.choice(all_forms)
                         reason = f"随机排除{slay}"
                     
-                    elif strategy_ == "trend_reverse":
+                    elif strategy == "trend_reverse":
                         if len(recent) >= 3 and recent[0] == recent[1] == recent[2]:
                             slay = opposites.get(curr, random.choice(all_forms))
                             reason = f"三连{curr}，反转杀{slay}"
@@ -409,7 +405,7 @@ def generate_slay_models():
                         slay = random.choice(all_forms)
                         reason = f"默认{slay}"
                     
-                    return [slay], f"[{strategy_}] {reason}"
+                    return [slay], f"[{strategy}] {reason}"
                 except:
                     return [random.choice(all_forms)], "异常"
             return slay_model
@@ -432,7 +428,7 @@ SLAY_MODELS = generate_slay_models()
 ALL_MODELS = {**DUAL_MODELS, **SLAY_MODELS}
 
 ALL_MODELS[201] = {
-    "func": lambda h, k, y: algo_v8_hybrid(h, k, y)[0],
+    "func": lambda h, k, y: algo_v8_hybrid(h, k, y),
     "info": {"id": 201, "name": "V8-Hybrid 双组(原)", "type": "双组", "params": "原始权重"}
 }
 ALL_MODELS[202] = {
@@ -509,7 +505,7 @@ def get_backtest_rank_top10():
     return sorted(ranks, key=lambda x: x["win"], reverse=True)[:10]
 
 
-# ==================== 键盘菜单 ====================
+# ==================== 键盘 ====================
 def main_menu_keyboard():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     kb.add("🔮 输入编号预测", "📊 算法胜率排行")
@@ -538,7 +534,7 @@ def buy_keyboard():
     return mk
 
 
-def predict_refresh_keyboard(model_id, next_issue):
+def predict_refresh_keyboard(model_id):
     mk = types.InlineKeyboardMarkup(row_width=2)
     mk.add(
         types.InlineKeyboardButton("🔄 刷新预测", callback_data=f"refresh_{model_id}"),
@@ -551,7 +547,7 @@ def check_auth(chat_id):
     return chat_id in authorized_users
 
 
-# ==================== 指令处理 ====================
+# ==================== 指令 ====================
 @bot.message_handler(commands=['start'])
 def welcome(m):
     text = (
@@ -616,9 +612,8 @@ def predict_by_model_id(m):
 
     test_len = min(200, len(history) - 1)
     win_count = 0
-    current_streak = 0
-    max_streak = 0
     streak = 0
+    max_streak = 0
 
     for i in range(1, test_len + 1):
         try:
@@ -676,7 +671,7 @@ def predict_by_model_id(m):
         f"💡 输入其他编号切换模型"
     )
 
-    bot.send_message(m.chat.id, msg, parse_mode="Markdown", reply_markup=predict_refresh_keyboard(model_id, next_issue))
+    bot.send_message(m.chat.id, msg, parse_mode="Markdown", reply_markup=predict_refresh_keyboard(model_id))
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("refresh_"))
@@ -710,9 +705,8 @@ def cb_refresh_predict(c):
 
     test_len = min(200, len(history) - 1)
     win_count = 0
-    current_streak = 0
-    max_streak = 0
     streak = 0
+    max_streak = 0
 
     for i in range(1, test_len + 1):
         try:
@@ -768,7 +762,7 @@ def cb_refresh_predict(c):
         f"⚙️ 参数: {info['params']}"
     )
 
-    bot.edit_message_text(msg, chat_id, c.message.message_id, parse_mode="Markdown", reply_markup=predict_refresh_keyboard(model_id, next_issue))
+    bot.edit_message_text(msg, chat_id, c.message.message_id, parse_mode="Markdown", reply_markup=predict_refresh_keyboard(model_id))
     bot.answer_callback_query(c.id, "✅ 已刷新")
 
 
@@ -918,13 +912,12 @@ if __name__ == "__main__":
     print("🚀 小鶴神终端 V20.0 已启动")
     while True:
         try:
-            print("开始polling...")
             bot.infinity_polling(timeout=60, long_polling_timeout=30)
         except requests.exceptions.ReadTimeout:
-            print("超时，重连中...")
+            print("超时重连...")
             time.sleep(3)
         except requests.exceptions.ConnectionError:
-            print("连接断开，重连中...")
+            print("连接断开重连...")
             time.sleep(5)
         except Exception as e:
             print(f"异常: {e}")
