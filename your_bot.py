@@ -407,8 +407,8 @@ ALL_MODELS[203] = {"func": lambda h, k=None, y=None: algo_v23_armor(h), "info": 
 ALL_MODELS[204] = {"func": lambda h, k=None, y=None: algo_5y_resonance(h), "info": {"id": 204, "name": "5y Resonance 双组(原)", "type": "双组", "params": "原始共振"}}
 
 
-# ==================== 排行榜TOP10 ====================
-def get_backtest_rank_top10():
+# ==================== 排行榜 ====================
+def get_backtest_rank_top10(filter_type=None):
     history, keno, yl = get_global_clean_data()
     if len(history) < 25:
         return []
@@ -416,6 +416,8 @@ def get_backtest_rank_top10():
     ranks = []
     for mid, md in ALL_MODELS.items():
         info = md["info"]
+        if filter_type and info["type"] != filter_type:
+            continue
         func = md["func"]
         mt = info["type"]
         win = 0; streak = 0; ms = 0
@@ -444,9 +446,10 @@ def get_backtest_rank_top10():
 # ==================== 键盘 ====================
 def main_menu_keyboard():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    kb.add("🔮 输入编号预测", "📊 算法胜率排行")
-    kb.add("📈 数据走势分析", "🔍 模型编号查询")
-    kb.add("🔑 购买/续费卡密", "👤 联系人工客服")
+    kb.add("🔮 输入编号预测", "📊 双组胜率排行")
+    kb.add("📊 杀组胜率排行", "📈 数据走势分析")
+    kb.add("🔍 模型编号查询", "🔑 购买/续费卡密")
+    kb.add("👤 联系人工客服")
     return kb
 
 def auth_keyboard():
@@ -495,13 +498,14 @@ def welcome(m):
     else:
         bot.send_photo(m.chat.id, IMG_LOGO, caption=text, reply_markup=auth_keyboard())
 
-@bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 算法胜率排行", "📈 数据走势分析", "🔍 模型编号查询"])
+@bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 双组胜率排行", "📊 杀组胜率排行", "📈 数据走势分析", "🔍 模型编号查询"])
 def protected_features(m):
     if not check_auth(m.chat.id):
         bot.send_message(m.chat.id, "⚠️ 请先登录", reply_markup=auth_keyboard())
         return
     if m.text == "🔮 输入编号预测": bot.send_message(m.chat.id, "🎯 输入编号 (1-204)")
-    elif m.text == "📊 算法胜率排行": show_rank(m)
+    elif m.text == "📊 双组胜率排行": show_rank(m, "双组")
+    elif m.text == "📊 杀组胜率排行": show_rank(m, "杀组")
     elif m.text == "📈 数据走势分析": data_analysis(m)
     elif m.text == "🔍 模型编号查询": bot.send_message(m.chat.id, "📋 输入编号 (1-204)")
 
@@ -616,14 +620,16 @@ def cb_refresh(c):
 @bot.callback_query_handler(func=lambda c: c.data == "change_model")
 def cb_change(c): bot.answer_callback_query(c.id); bot.send_message(c.message.chat.id, "🎯 输入新编号 (1-204)")
 
-def show_rank(m):
-    ranks = get_backtest_rank_top10()
-    if not ranks: bot.send_message(m.chat.id, "❌ 数据不足"); return
-    txt = f"🏆 TOP10 (近{ranks[0]['total']}期)\n━━━━━━━━━━━━━━\n"
+def show_rank(m, filter_type=None):
+    ranks = get_backtest_rank_top10(filter_type)
+    if not ranks:
+        bot.send_message(m.chat.id, "❌ 数据不足")
+        return
+    type_name = filter_type if filter_type else "全部"
+    txt = f"🏆 TOP10 {type_name} (近{ranks[0]['total']}期)\n━━━━━━━━━━━━━━\n"
     for i, r in enumerate(ranks):
         medal = ["🥇","🥈","🥉"][i] if i < 3 else f"{i+1}."
-        note = "(双组)" if r["type"] == "双组" else "(杀组)"
-        txt += f"{medal} #{r['id']} {r['name']}：{r['rate']:.1f}% {note}\n   🔥 最大: {r['streak']} | 当前: {r['current_streak']}\n"
+        txt += f"{medal} #{r['id']} {r['name']}：{r['rate']:.1f}%\n   🔥 最大: {r['streak']} | 当前: {r['current_streak']}\n"
     bot.send_message(m.chat.id, txt)
 
 def data_analysis(m):
