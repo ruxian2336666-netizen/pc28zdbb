@@ -5,9 +5,10 @@ import random
 from datetime import datetime
 from collections import Counter
 
-# ==================== 全局公共配置（统一共用） ====================
+# ==================== 全局公共配置 ====================
 BOT_TOKEN = "8789627493:AAExE8z-tRhrbGvENYVt4dxqWUFf56rrZJQ"
-CHANNEL_IDS = ["@xx7273", "@zdbs1"]
+# 清空频道，完全不推送
+CHANNEL_IDS = []
 API_KJ = "https://pc28.help/api/kj.json?nbr=100"
 API_KENO = "https://pc28.help/api/keno.json?nbr=100"
 API_YL = "https://pc28.help/api/yl.json"
@@ -19,7 +20,7 @@ API_MAP = {
 CATEGORIES = ["大单", "小单", "大双", "小双"]
 PREDICT_INTERVAL = 20
 
-# ==================== 第一个算法 V8-HYBRID 逻辑原样完整 ====================
+# ==================== 第一个算法 V8-HYBRID 原样完整 ====================
 class HybridEngineV8:
     def __init__(self):
         self.last_issue = None
@@ -72,18 +73,15 @@ class HybridEngineV8:
         dual_pred, conf = self.calculate(keno, yl, best_weights)
 
         msg = (
-            f"⚡ <b>逻辑跳跃引擎 (V8-HYBRID)</b>\n"
+            f"⚡ 逻辑跳跃引擎 (V8-HYBRID)\n"
             f"━━━━━━━━━━━━━━\n"
-            f"📡 开奖:{curr_issue}期 → <b>{kj[0]['combination']}</b>\n"
+            f"📡 开奖:{curr_issue}期 → {kj[0]['combination']}\n"
             f"🎯 预测:{int(curr_issue)+1}期\n\n"
-            f"🔥 核心推荐:<b>{dual_pred[0]} + {dual_pred[1]}</b>\n"
+            f"🔥 核心推荐:{dual_pred[0]} + {dual_pred[1]}\n"
             f"🚦 信心评级:{'⭐' * (recent_hits // 2 if recent_hits > 4 else 2)}\n"
             f"━━━━━━━━━━━━━━\n"
             f"📈 动态回测胜率:{recent_hits * 10}%\n"
-            f"🧠 逻辑:实时权重修正 (非遗传)\n"
-            f"🛠️ 模式:{'偏向物理' if best_weights['keno'] > 60 else '偏向遗漏'}\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"💡 建议:当前胜率已根据近10期自动校准。"
+            f"🛠️ 模式:{'偏向物理' if best_weights['keno'] > 60 else '偏向遗漏'}"
         )
         return curr_issue, msg
 
@@ -207,16 +205,12 @@ class ArmorSlayer:
             rate = (hits / 15) * 100
 
             msg = (
-                f"🛡️ <b>形态级反向杀组 (V23-ARMOR)</b>\n"
+                f"🛡️ 形态级反向杀组 (V23-ARMOR)\n"
                 f"━━━━━━━━━━━━━━\n"
-                f"📡 上期:{curr_issue}期 → <b>{data[0]['combination']}</b>\n\n"
-                f"🚫 <b>下期必杀:【 {slay_result} 】</b>\n"
-                f"📝 理由:{self.get_reason(data)}\n"
+                f"📡 上期:{curr_issue}期 → {data[0]['combination']}\n\n"
+                f"🚫 下期必杀:【 {slay_result} 】\n"
                 f"━━━━━━━━━━━━━━\n"
-                f"📈 <b>形态排除成功率:{rate:.1f}%</b>\n"
-                f"🛡️ <b>风险等级:{'极低' if rate >= 86 else '一般'}</b>\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"💡 逻辑:长龙保护 + 属性对冲算法"
+                f"📈 形态排除成功率:{rate:.1f}%"
             )
             return curr_issue, msg
         except Exception as e:
@@ -271,71 +265,53 @@ class Resonance5yEngine:
                 if data[j-1]["combination"] in d: hits += 1
 
             msg = (
-                f"🌀 <b>5y属性共振推演 (V18.1-FIX)</b>\n"
+                f"🌀 5y属性共振推演 (V18.1-FIX)\n"
                 f"━━━━━━━━━━━━━━\n"
-                f"📡 开奖:{curr_issue}期 → <b>{data[0]['combination']}</b>\n"
-                f"🎯 <b>下期预测:{int(curr_issue)+1}期</b>\n\n"
-                f"🧭 5y坐标:<b>{pred_5y}</b>\n"
-                f"🔥 核心推荐:<b>{pred_dual[0]} + {pred_dual[1]}</b>\n"
+                f"📡 开奖:{curr_issue}期 → {data[0]['combination']}\n"
+                f"🎯 下期预测:{int(curr_issue)+1}期\n\n"
+                f"🧭 5y坐标:{pred_5y}\n"
+                f"🔥 核心推荐:{pred_dual[0]} + {pred_dual[1]}\n"
                 f"━━━━━━━━━━━━━━\n"
-                f"📈 近10期共振胜率:{hits * 10}%\n"
-                f"🧠 逻辑:漂移修正 + 索引锁定\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"💡 提示:错误已修复,预测轨道已强制对齐。"
+                f"📈 近10期共振胜率:{hits * 10}%"
             )
             return curr_issue, msg
         except Exception as e:
             print(f"运行异常: {e}")
             return None, None
 
-# ==================== 统一推送公共函数 ====================
-def send_tg_text(text, parse_mode="HTML"):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    for cid in CHANNEL_IDS:
-        try:
-            requests.post(url, json={
-                "chat_id": cid,
-                "text": text,
-                "parse_mode": parse_mode
-            }, timeout=10)
-        except:
-            pass
-
-# ==================== 主程序统一轮询（本地运行 不碰GitHub） ====================
+# ==================== 主程序：只打印本地控制台、不推送任何频道 ====================
 def main():
-    print("🚀 四算法合一 本地启动成功（不触碰GitHub）")
-    # 实例化四个算法
+    print("🚀 四算法合一 本地运行（已关闭所有频道推送）")
     v8_engine = HybridEngineV8()
     armor_engine = ArmorSlayer()
     fivey_engine = Resonance5yEngine()
 
     last_issue_all = None
     stats = {"hit": 0, "total": 0}
-    history_lines = []
     pending_prediction = None
 
     while True:
-        # 1. V8算法推送
+        # V8 控制台打印
         curr_v8, msg_v8 = v8_engine.run_once()
         if curr_v8 and curr_v8 != last_issue_all:
-            send_tg_text(msg_v8)
+            print("\n" + msg_v8)
 
-        # 2. 形态装甲V23推送
+        # 形态装甲 控制台打印
         curr_armor, msg_armor = armor_engine.run_once()
         if curr_armor and curr_armor != last_issue_all:
-            send_tg_text(msg_armor)
+            print("\n" + msg_armor)
 
-        # 3. 5y共振推送
+        # 5y共振 控制台打印
         curr_fivey, msg_fivey = fivey_engine.run_once()
         if curr_fivey and curr_fivey != last_issue_all:
-            send_tg_text(msg_fivey)
+            print("\n" + msg_fivey)
 
-        # 4. 4D双组算法独立运行
+        # 4D双组 控制台打印
         history, _ = get_latest_data()
         if history:
             current_issue = history[0]["issue"]
             if current_issue != last_issue_all:
-                print(f"🔔 4D算法期号更新: {current_issue}")
+                print(f"\n🔔 4D算法 期号更新: {current_issue}")
                 if pending_prediction and pending_prediction["issue"] == current_issue:
                     actual_cat = history[0]["category"]
                     is_hit = actual_cat in pending_prediction["pred"]
@@ -351,13 +327,13 @@ def main():
                     rate = (stats["hit"] / stats["total"] * 100) if stats["total"] > 0 else 0
                     now_str = datetime.now().strftime('%H:%M:%S')
                     msg_4d = (
-                        f"🔮 *双组优选预测* (第 `{current_issue}` 期)\n"
+                        f"🔮 双组优选预测 第 {current_issue} 期\n"
                         f"———————————————\n"
-                        f"🎯 下期建议: `{show_pred}`\n"
-                        f"📈 历史胜率: `{rate:.1f}% ({stats['hit']}/{stats['total']})`\n"
+                        f"🎯 下期建议: {show_pred}\n"
+                        f"📈 历史胜率: {rate:.1f}% ({stats['hit']}/{stats['total']})\n"
                         f"⏰ 预测时间: {now_str}"
                     )
-                    send_tg_text(msg_4d, parse_mode="Markdown")
+                    print(msg_4d)
                 last_issue_all = current_issue
 
         time.sleep(25)
