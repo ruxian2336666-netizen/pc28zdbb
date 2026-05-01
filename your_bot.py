@@ -96,338 +96,206 @@ def get_global_clean_data():
     now = time.time()
     if global_kj_cache and global_keno_cache and (now - last_fetch_time) < FETCH_INTERVAL:
         return global_kj_cache, global_keno_cache, global_yl_cache
-
-    clean = []
-    keno_data = []
-    yl_data = {}
-
+    clean, keno_data, yl_data = [], [], {}
     try:
         resp = requests.get(API_KJ, timeout=8)
         if resp.status_code == 200:
-            raw_list = resp.json().get("data", [])
-            for item in raw_list:
+            for item in resp.json().get("data", []):
                 num_str = item.get("number", "")
-                if not num_str:
-                    continue
+                if not num_str: continue
                 try:
                     nums = [int(x) for x in num_str.split("+")]
-                    total = sum(nums)
-                    clean.append({
-                        "nbr": item.get("nbr", ""),
-                        "total": total,
-                        "combination": item.get("combination", "未知"),
-                        "number": num_str,
-                        "nums": nums
-                    })
-                except:
-                    continue
-        if clean:
-            global_kj_cache = clean
-
+                    clean.append({"nbr": item.get("nbr", ""), "total": sum(nums), "combination": item.get("combination", "未知"), "number": num_str, "nums": nums})
+                except: continue
+        if clean: global_kj_cache = clean
         resp2 = requests.get(API_KENO, timeout=8)
         if resp2.status_code == 200:
             keno_data = resp2.json().get("data", [])
-            if keno_data:
-                global_keno_cache = keno_data
-
+            if keno_data: global_keno_cache = keno_data
         resp3 = requests.get(API_YL, timeout=8)
         if resp3.status_code == 200:
             yl_data = resp3.json().get("data", {})
-            if yl_data:
-                global_yl_cache = yl_data
-
+            if yl_data: global_yl_cache = yl_data
         last_fetch_time = now
-        return global_kj_cache, global_keno_cache, global_yl_cache
-    except:
-        return global_kj_cache, global_keno_cache, global_yl_cache
+    except: pass
+    return global_kj_cache, global_keno_cache, global_yl_cache
 
 
-# ==================== 原有4大算法 ====================
+# ==================== 原始4大算法 ====================
 def algo_v8_hybrid(history, keno_data, yl_data):
     try:
-        if not keno_data or len(keno_data) < 15:
-            return ["小双", "小单"]
-        best_w = {"keno": 55, "yl": 3.5}
-        max_hits = -1
+        if not keno_data or len(keno_data) < 15: return ["小双", "小单"]
+        best_w = {"keno": 55, "yl": 3.5}; max_hits = -1
         for k_w in [35, 55, 75]:
             for y_w in [1.5, 3.5, 5.5]:
                 hits = 0
-                test_range = min(10, len(keno_data) - 1, len(history))
-                for i in range(1, test_range + 1):
+                for i in range(1, min(10, len(keno_data)-1, len(history))+1):
                     try:
                         nbrs = [int(n) for n in keno_data[i]["nbrs"].split(",")]
-                        p_val = sum([nbrs[j] for j in [1, 4, 7, 10, 13, 16]]) % 10
-                        raw_map = ["小双", "小单", "小双", "小单", "小双", "大单", "大双", "大单", "大双", "大单"]
-                        keno_pred = raw_map[p_val]
-                        scores = {"大单": 100.0, "小单": 100.0, "大双": 100.0, "小双": 100.0}
-                        scores[keno_pred] += k_w
-                        for cat in scores:
-                            scores[cat] += float(yl_data.get(cat, 0)) * y_w
-                        sorted_res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-                        dual = [sorted_res[0][0], sorted_res[1][0]]
-                        if history[i - 1]["combination"] in dual:
-                            hits += 1
-                    except:
-                        continue
-                if hits > max_hits:
-                    max_hits = hits
-                    best_w = {"keno": k_w, "yl": y_w}
+                        p_val = sum([nbrs[j] for j in [1,4,7,10,13,16]]) % 10
+                        raw_map = ["小双","小单","小双","小单","小双","大单","大双","大单","大双","大单"]
+                        scores = {"大单":100,"小单":100,"大双":100,"小双":100}
+                        scores[raw_map[p_val]] += k_w
+                        for cat in scores: scores[cat] += float(yl_data.get(cat,0)) * y_w
+                        dual = sorted(scores, key=scores.get, reverse=True)[:2]
+                        if history[i-1]["combination"] in dual: hits += 1
+                    except: continue
+                if hits > max_hits: max_hits = hits; best_w = {"keno":k_w, "yl":y_w}
         nbrs = [int(n) for n in keno_data[0]["nbrs"].split(",")]
-        p_val = sum([nbrs[i] for i in [1, 4, 7, 10, 13, 16]]) % 10
-        raw_map = ["小双", "小单", "小双", "小单", "小双", "大单", "大双", "大单", "大双", "大单"]
-        scores = {"大单": 100.0, "小单": 100.0, "大双": 100.0, "小双": 100.0}
+        p_val = sum([nbrs[i] for i in [1,4,7,10,13,16]]) % 10
+        raw_map = ["小双","小单","小双","小单","小双","大单","大双","大单","大双","大单"]
+        scores = {"大单":100,"小单":100,"大双":100,"小双":100}
         scores[raw_map[p_val]] += best_w["keno"]
-        for cat in scores:
-            scores[cat] += float(yl_data.get(cat, 0)) * best_w["yl"]
-        sorted_res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        return [sorted_res[0][0], sorted_res[1][0]]
-    except:
-        return ["小双", "小单"]
-
+        for cat in scores: scores[cat] += float(yl_data.get(cat,0)) * best_w["yl"]
+        return sorted(scores, key=scores.get, reverse=True)[:2]
+    except: return ["小双","小单"]
 
 def algo_4d_pi(history):
     try:
-        if len(history) < 5:
-            return ["大双", "大单"]
-        phi = (1 + 5 ** 0.5) / 2
-        latest = history[0]
-        fixed_sum = sum(h["total"] for h in history[1:5]) if len(history) >= 5 else 52
-        raw = (fixed_sum * phi) / (latest["total"] * math.pi if latest["total"] > 0 else 1.5)
-        s = "{:.10f}".format(abs(raw - int(raw))).split('.')[1]
-        cat_map = {0: "小双", 1: "小单", 2: "小双", 3: "小单", 4: "小双", 5: "大单", 6: "大双", 7: "大单", 8: "大双", 9: "大单"}
-        opp = {"大单": "小单", "大双": "小双", "小单": "大单", "小双": "大双"}
-        c1 = cat_map[int(s[0])]
-        c2 = cat_map[int(s[1])] if len(s) > 1 else cat_map[(int(s[0]) + 5) % 10]
-        if c1 == c2:
-            c2 = opp[c1]
-        return [c1, c2]
-    except:
-        return ["大双", "大单"]
-
+        if len(history) < 5: return ["大双","大单"]
+        phi = (1+5**0.5)/2; latest = history[0]
+        fixed_sum = sum(h["total"] for h in history[1:5]) if len(history)>=5 else 52
+        raw = (fixed_sum*phi)/(latest["total"]*math.pi if latest["total"]>0 else 1.5)
+        s = "{:.10f}".format(abs(raw-int(raw))).split('.')[1]
+        cat_map = {0:"小双",1:"小单",2:"小双",3:"小单",4:"小双",5:"大单",6:"大双",7:"大单",8:"大双",9:"大单"}
+        opp = {"大单":"小单","大双":"小双","小单":"大单","小双":"大双"}
+        c1,c2 = cat_map[int(s[0])], cat_map[int(s[1])] if len(s)>1 else cat_map[(int(s[0])+5)%10]
+        if c1==c2: c2=opp[c1]
+        return [c1,c2]
+    except: return ["大双","大单"]
 
 def algo_v23_armor(history):
     try:
-        if len(history) < 15:
-            return ["小单"], "数据不足"
-        recent_10 = [i["combination"] for i in history[:10]]
-        recent_40 = [i["combination"] for i in history[:min(40, len(history))]]
-        counts_40 = Counter(recent_40)
-        curr_form = recent_10[0]
-        prev_form = recent_10[1]
-        opposites = {"大单": "小双", "小双": "大单", "大双": "小单", "小单": "大双"}
-        all_forms = ["大单", "小单", "大双", "小双"]
-        if curr_form == prev_form:
-            slay = opposites.get(curr_form, "小单")
-            reason = f"【{curr_form}】长龙运行，阻断对立补位"
-        elif len(set(recent_10[:5])) >= 3:
-            slay = sorted(all_forms, key=lambda x: abs(counts_40.get(x, 10) - 10))[0]
-            reason = "盘路震荡，杀掉平庸回归项"
+        if len(history)<15: return ["小单"],"数据不足"
+        r10=[i["combination"] for i in history[:10]]
+        r40=[i["combination"] for i in history[:min(40,len(history))]]
+        c40=Counter(r40); curr,prev=r10[0],r10[1]
+        opp={"大单":"小双","小双":"大单","大双":"小单","小单":"大双"}
+        af=["大单","小单","大双","小双"]
+        if curr==prev: s=opp.get(curr,"小单"); reason=f"【{curr}】长龙运行"
+        elif len(set(r10[:5]))>=3: s=sorted(af,key=lambda x:abs(c40.get(x,10)-10))[0]; reason="盘路震荡"
         else:
-            omissions = {}
-            for f in all_forms:
-                try:
-                    omissions[f] = recent_40.index(f)
-                except:
-                    omissions[f] = 40
-            slay = sorted(omissions, key=omissions.get, reverse=True)[0]
-            reason = "形态深冷，判定无力回补"
-        return [slay], reason
-    except:
-        return ["小单"], "数据异常"
-
+            om={}
+            for f in af:
+                try: om[f]=r40.index(f)
+                except: om[f]=40
+            s=sorted(om,key=om.get,reverse=True)[0]; reason="形态深冷"
+        return [s],reason
+    except: return ["小单"],"数据异常"
 
 def algo_5y_resonance(history):
     try:
-        if len(history) < 15:
-            return ["大单", "小双"]
-        five_y_table = {
-            0: [20, 15, 25, 5, 10],
-            1: [1, 11, 21, 6, 16, 26],
-            2: [2, 12, 22, 7, 17, 27],
-            3: [13, 23, 3, 8, 18],
-            4: [14, 24, 4, 19, 9]
-        }
-        def get_comb(n):
-            return ("大" if n >= 14 else "小") + ("单" if n % 2 != 0 else "双")
-        five_y_props = {}
-        for k, nums in five_y_table.items():
-            five_y_props[k] = Counter([get_comb(n) for n in nums])
-        y_list = []
-        for i in history[:15]:
-            nums = i.get("nums", [int(x) for x in i["number"].split("+")])
-            y_list.append(sum(nums) % 5)
-        diffs = [y_list[i] - y_list[i + 1] for i in range(min(3, len(y_list) - 1))]
-        avg_diff = sum(diffs) / len(diffs) if diffs else 0
-        pred_y_idx = int(round(y_list[0] + avg_diff)) % 5
-        recent_combs = Counter([i["combination"] for i in history[:20]])
-        group_combs = five_y_props.get(pred_y_idx, Counter())
-        scores = {}
-        for comb in ["大单", "小单", "大双", "小双"]:
-            scores[comb] = group_combs.get(comb, 0) * (recent_combs.get(comb, 0) + 2)
-        top_two = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:2]
-        return [top_two[0][0], top_two[1][0]]
-    except:
-        return ["大单", "小双"]
+        if len(history)<15: return ["大单","小双"]
+        fyt={0:[20,15,25,5,10],1:[1,11,21,6,16,26],2:[2,12,22,7,17,27],3:[13,23,3,8,18],4:[14,24,4,19,9]}
+        def gc(n): return ("大" if n>=14 else "小")+("单" if n%2!=0 else "双")
+        fyp={k:Counter([gc(n) for n in nums]) for k,nums in fyt.items()}
+        yl=[sum(i.get("nums",[int(x) for x in i["number"].split("+")]))%5 for i in history[:15]]
+        diffs=[yl[i]-yl[i+1] for i in range(min(3,len(yl)-1))]
+        avg=sum(diffs)/len(diffs) if diffs else 0
+        pyi=int(round(yl[0]+avg))%5
+        rc=Counter([i["combination"] for i in history[:20]])
+        gc2=fyp.get(pyi,Counter())
+        sc={comb:gc2.get(comb,0)*(rc.get(comb,0)+2) for comb in ["大单","小单","大双","小双"]}
+        return [x[0] for x in sorted(sc.items(),key=lambda x:x[1],reverse=True)[:2]]
+    except: return ["大单","小双"]
 
 
-# ==================== 模型工厂函数 ====================
-def make_dual_func(kw, yw, bs, mm, uo):
-    def dual_model(history, keno_data, yl_data):
-        all_forms = ["大单", "小单", "大双", "小双"]
-        if not history or len(history) < 2:
-            return [random.choice(all_forms), random.choice(all_forms)]
-        scores = {cat: float(bs) for cat in all_forms}
-        if mm in ["keno_first", "balanced", "random_mix"] and keno_data and len(keno_data) > 0:
-            try:
-                nbrs_str = keno_data[0].get("nbrs", "")
-                if nbrs_str:
-                    nbrs = [int(n) for n in nbrs_str.split(",")]
-                    n_len = len(nbrs)
-                    if n_len >= 17:
-                        idx_list = [1, 4, 7, 10, 13, 16]
-                    elif n_len >= 6:
-                        idx_list = random.sample(range(n_len), min(6, n_len))
-                    else:
-                        idx_list = list(range(n_len))
-                    if idx_list:
-                        p_val = sum([nbrs[i] for i in idx_list]) % 10
-                        raw_map = ["小双", "小单", "小双", "小单", "小双", "大单", "大双", "大单", "大双", "大单"]
-                        scores[raw_map[p_val]] += kw
-            except:
-                pass
-        if mm in ["yl_first", "balanced"] and yl_data:
-            for cat in all_forms:
-                try:
-                    scores[cat] += float(yl_data.get(cat, 0)) * yw
-                except:
-                    pass
-        if len(history) >= 3:
-            recent = [h.get("combination", "") for h in history[:5]]
-            for cat in all_forms:
-                scores[cat] += recent.count(cat) * random.uniform(8, 18)
-        sorted_res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        dual = [sorted_res[0][0], sorted_res[1][0]]
-        if uo and dual[0] == dual[1]:
-            opp = {"大单": "小单", "大双": "小双", "小单": "大单", "小双": "大双"}
-            dual[1] = opp.get(dual[0], random.choice([c for c in all_forms if c != dual[0]]))
-        return dual
-    return dual_model
-
-
-def make_slay_func(st, lb, th):
-    def slay_model(history):
-        all_forms = ["大单", "小单", "大双", "小双"]
-        opposites = {"大单": "小双", "小双": "大单", "大双": "小单", "小单": "大双"}
-        if not history or len(history) < 3:
-            return [random.choice(all_forms)], "数据不足"
-        lb_actual = min(lb, len(history))
-        recent = []
-        for i in history[:lb_actual]:
-            comb = i.get("combination", "") if isinstance(i, dict) else ""
-            recent.append(comb if comb else random.choice(all_forms))
-        if not recent:
-            return [random.choice(all_forms)], "无数据"
-        counts = Counter(recent)
-        curr = recent[0]
-        
-        if st == "long_dragon":
-            if len(recent) >= 2 and recent[0] == recent[1]:
-                slay = opposites.get(curr, random.choice(all_forms))
-                reason = f"长龙{curr}，杀对立{slay}"
-            else:
-                slay = curr
-                reason = f"无长龙，杀当前{slay}"
-        elif st == "cold_hunt":
-            slay = sorted(all_forms, key=lambda x: counts.get(x, 0))[0]
-            reason = f"杀最冷{slay}({counts.get(slay,0)}次)"
-        elif st == "hot_avoid":
-            slay = sorted(all_forms, key=lambda x: counts.get(x, 0), reverse=True)[0]
-            reason = f"避热杀{slay}({counts.get(slay,0)}次)"
-        elif st == "cycle_kill":
-            cycle_idx = (len(history) // max(th, 1)) % 4
-            slay = all_forms[cycle_idx]
-            reason = f"周期轮杀{slay}"
-        elif st == "random_avoid":
-            slay = random.choice(all_forms)
-            reason = f"随机排除{slay}"
-        elif st == "trend_reverse":
-            if len(recent) >= 3 and recent[0] == recent[1] == recent[2]:
-                slay = opposites.get(curr, random.choice(all_forms))
-                reason = f"三连{curr}，反转杀{slay}"
-            else:
-                slay = sorted(all_forms, key=lambda x: counts.get(x, 0))[0]
-                reason = f"趋势不明，杀最冷{slay}"
-        else:
-            slay = random.choice(all_forms)
-            reason = f"默认{slay}"
-        return [slay], f"[{st}] {reason}"
-    return slay_model
-
-
-# ==================== 204个模型 ====================
+# ==================== 404个模型 ====================
 ALL_MODELS = {}
 
-DUAL_PARAMS = []
-for idx in range(1, 101):
-    DUAL_PARAMS.append({
-        "id": idx,
-        "kw": random.choice([25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]),
-        "yw": random.choice([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0]),
-        "bs": random.choice([80, 90, 100, 110, 120]),
-        "mm": random.choice(["keno_first", "yl_first", "balanced", "random_mix"]),
-        "uo": random.choice([True, False])
-    })
+# --- 200个杀组模型 (1-200) ---
+def master_slay_logic(history, config):
+    if not history or len(history) < config['min_len']:
+        return ["小单"], "基础数据不足"
+    all_forms = ["大单", "小单", "大双", "小双"]
+    opposites = {"大单": "小双", "小双": "大单", "大双": "小单", "小单": "大双"}
+    recent = [h.get("combination", "小单") for h in history[:config['lookback']]]
+    counts = Counter(recent)
+    curr = recent[0]
+    mode = config['mode']
+    if mode == "COLD":
+        target = sorted(all_forms, key=lambda x: counts.get(x, 0))[0]
+        reason = f"冷态排除: {target}"
+    elif mode == "HOT":
+        target = sorted(all_forms, key=lambda x: counts.get(x, 0), reverse=True)[0]
+        reason = f"过热回避: {target}"
+    elif mode == "DRAGON":
+        if len(recent) >= config['threshold'] and all(x == curr for x in recent[:config['threshold']]):
+            target = opposites.get(curr, "小单")
+            reason = f"长龙趋势拦截: {target}"
+        else:
+            target = random.choice(all_forms)
+            reason = "非长龙区间随机杀"
+    elif mode == "CYCLE":
+        idx = (int(history[0].get('nbr', 0)) % config['mod_val']) % 4
+        target = all_forms[idx]
+        reason = f"周期性偏移杀: {target}"
+    else:
+        target = opposites.get(curr, "大单")
+        reason = "形态对称性排除"
+    return [target], reason
 
-SLAY_PARAMS = []
-for idx in range(1, 101):
-    SLAY_PARAMS.append({
-        "id": idx + 100,
-        "st": random.choice(["long_dragon", "cold_hunt", "hot_avoid", "cycle_kill", "random_avoid", "trend_reverse"]),
-        "lb": random.choice([5, 10, 15, 20, 25, 30, 35, 40]),
-        "th": random.choice([2, 3, 4, 5])
-    })
-
-for p in DUAL_PARAMS:
-    mid = p["id"]
-    ALL_MODELS[mid] = {
-        "func": make_dual_func(p["kw"], p["yw"], p["bs"], p["mm"], p["uo"]),
-        "info": {"id": mid, "name": f"双组M{mid}", "type": "双组", "params": f"K:{p['kw']} Y:{p['yw']} B:{p['bs']} M:{p['mm']} O:{p['uo']}"}
+for i in range(1, 201):
+    if i <= 40: conf = {'mode': "COLD", 'lookback': 10 + i, 'min_len': 15, 'desc': "冷态流"}
+    elif i <= 80: conf = {'mode': "HOT", 'lookback': 20 + (i-40), 'min_len': 25, 'desc': "热态流"}
+    elif i <= 120: conf = {'mode': "DRAGON", 'lookback': 5, 'threshold': 2 + (i % 3), 'min_len': 10, 'desc': "截龙流"}
+    elif i <= 160: conf = {'mode': "CYCLE", 'mod_val': 3 + (i % 7), 'lookback': 1, 'min_len': 5, 'desc': "周期流"}
+    else: conf = {'mode': "REVERSE", 'lookback': 1, 'min_len': 5, 'desc': "对称流"}
+    ALL_MODELS[i] = {
+        "func": lambda h, c=conf: master_slay_logic(h, c),
+        "info": {"id": i, "name": f"{conf['desc']} M{i}", "type": "杀组", "params": f"L:{conf['lookback']} M:{conf['mode']}"}
     }
 
-for p in SLAY_PARAMS:
-    mid = p["id"]
+# --- 200个双组模型 (201-400) ---
+def master_dual_logic(history, keno, yl, config):
+    all_forms = ["大单", "小单", "大双", "小双"]
+    if not history or not keno: return [random.choice(all_forms), random.choice(all_forms)]
+    scores = {cat: 100.0 for cat in all_forms}
+    try:
+        nbrs = [int(n) for n in keno[0].get("nbrs", "").split(",")]
+        p_val = sum([nbrs[i] for i in config['keno_indices'] if i < len(nbrs)]) % 10
+        raw_map = ["小双", "小单", "小双", "小单", "小双", "大单", "大双", "大单", "大双", "大单"]
+        scores[raw_map[p_val]] += config['keno_weight']
+    except: pass
+    for cat in all_forms: scores[cat] += float(yl.get(cat, 0)) * config['yl_weight']
+    recent = [h.get("combination") for h in history[:config['trend_depth']]]
+    for cat in all_forms: scores[cat] += recent.count(cat) * config['trend_weight']
+    return [x[0] for x in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:2]]
+
+for i in range(1, 201):
+    mid = i + 200
+    if i <= 50: conf = {'keno_weight': 60 + (i * 0.5), 'yl_weight': 1.5, 'trend_weight': 5, 'trend_depth': 5, 'keno_indices': [1, 4, 7, 10, 13, 16], 'desc': "Keno领先型"}
+    elif i <= 100: conf = {'keno_weight': 30, 'yl_weight': 3.0 + (i * 0.05), 'trend_weight': 10, 'trend_depth': 10, 'keno_indices': [0, 2, 5, 8, 11, 14], 'desc': "遗漏补偿型"}
+    elif i <= 150: conf = {'keno_weight': 20, 'yl_weight': 1.0, 'trend_weight': 15 + (i * 0.2), 'trend_depth': 15 + (i % 5), 'keno_indices': [3, 6, 9, 12, 15, 18], 'desc': "趋势惯性型"}
+    else: conf = {'keno_weight': 45, 'yl_weight': 2.5, 'trend_weight': 12, 'trend_depth': 8, 'keno_indices': random.sample(range(20), 6), 'desc': "混沌均衡型"}
     ALL_MODELS[mid] = {
-        "func": make_slay_func(p["st"], p["lb"], p["th"]),
-        "info": {"id": mid, "name": f"杀组M{mid}", "type": "杀组", "params": f"S:{p['st']} L:{p['lb']} T:{p['th']}"}
+        "func": lambda h, k, y, c=conf: master_dual_logic(h, k, y, c),
+        "info": {"id": mid, "name": f"{conf['desc']} D{i}", "type": "双组", "params": f"K:{conf['keno_weight']:.1f} Y:{conf['yl_weight']:.2f} T:{conf['trend_weight']:.1f}"}
     }
 
-ALL_MODELS[201] = {"func": lambda h, k=None, y=None: algo_v8_hybrid(h, k, y), "info": {"id": 201, "name": "V8-Hybrid 双组(原)", "type": "双组", "params": "原始权重"}}
-ALL_MODELS[202] = {"func": lambda h, k=None, y=None: algo_4d_pi(h), "info": {"id": 202, "name": "4D-PI+PHI 双组(原)", "type": "双组", "params": "原始算力"}}
-ALL_MODELS[203] = {"func": lambda h, k=None, y=None: algo_v23_armor(h), "info": {"id": 203, "name": "Armor V23 杀组(原)", "type": "杀组", "params": "原始装甲"}}
-ALL_MODELS[204] = {"func": lambda h, k=None, y=None: algo_5y_resonance(h), "info": {"id": 204, "name": "5y Resonance 双组(原)", "type": "双组", "params": "原始共振"}}
+# --- 4个原始算法 (401-404) ---
+ALL_MODELS[401] = {"func": lambda h, k=None, y=None: algo_v8_hybrid(h, k, y), "info": {"id": 401, "name": "V8-Hybrid 双组(原)", "type": "双组", "params": "原始权重"}}
+ALL_MODELS[402] = {"func": lambda h, k=None, y=None: algo_4d_pi(h), "info": {"id": 402, "name": "4D-PI+PHI 双组(原)", "type": "双组", "params": "原始算力"}}
+ALL_MODELS[403] = {"func": lambda h, k=None, y=None: algo_v23_armor(h), "info": {"id": 403, "name": "Armor V23 杀组(原)", "type": "杀组", "params": "原始装甲"}}
+ALL_MODELS[404] = {"func": lambda h, k=None, y=None: algo_5y_resonance(h), "info": {"id": 404, "name": "5y Resonance 双组(原)", "type": "双组", "params": "原始共振"}}
 
 
 # ==================== 排行榜 ====================
 def get_backtest_rank_top10(filter_type=None):
     history, keno, yl = get_global_clean_data()
-    if len(history) < 25:
-        return []
+    if len(history) < 25: return []
     MAX_BACKTEST = min(200, len(history) - 1)
     ranks = []
     for mid, md in ALL_MODELS.items():
         info = md["info"]
-        if filter_type and info["type"] != filter_type:
-            continue
-        func = md["func"]
-        mt = info["type"]
-        win = 0; streak = 0; ms = 0
+        if filter_type and info["type"] != filter_type: continue
+        func = md["func"]; mt = info["type"]
+        win = streak = ms = 0
         for i in range(1, MAX_BACKTEST + 1):
             try:
                 h_slice = history[i:]
-                if mt == "双组":
-                    p = func(h_slice, keno, yl)
-                else:
-                    p = func(h_slice)
+                if mt == "双组": p = func(h_slice, keno, yl)
+                else: p = func(h_slice)
                 if isinstance(p, tuple): p = p[0]
                 actual = history[i-1]["combination"]
                 if mt == "双组":
@@ -446,8 +314,8 @@ def get_backtest_rank_top10(filter_type=None):
 # ==================== 键盘 ====================
 def main_menu_keyboard():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    kb.add("🔮 输入编号预测", "📊 双组胜率排行")
-    kb.add("📊 杀组胜率排行", "📈 数据走势分析")
+    kb.add("🔮 输入编号预测", "📊 杀组胜率排行")
+    kb.add("📊 双组胜率排行", "📈 数据走势分析")
     kb.add("🔍 模型编号查询", "🔑 购买/续费卡密")
     kb.add("👤 联系人工客服")
     return kb
@@ -467,118 +335,49 @@ def predict_refresh_keyboard(model_id):
     mk.add(types.InlineKeyboardButton("🔄 刷新预测", callback_data=f"refresh_{model_id}"), types.InlineKeyboardButton("📋 换模型", callback_data="change_model"))
     return mk
 
-def check_auth(chat_id):
-    return chat_id in authorized_users
+def check_auth(chat_id): return chat_id in authorized_users
 
 
 # ==================== 统一模型调用 ====================
 def run_model_pred(model_id, history, keno, yl):
     model_data = ALL_MODELS.get(model_id)
-    if not model_data:
-        return None, None
-    info = model_data["info"]
-    func = model_data["func"]
+    if not model_data: return None, None
+    info = model_data["info"]; func = model_data["func"]
     try:
-        if info["type"] == "双组":
-            result = func(history, keno, yl)
-        else:
-            result = func(history)
+        if info["type"] == "双组": result = func(history, keno, yl)
+        else: result = func(history)
         return result, info
     except Exception as e:
-        print(f"模型{model_id}运行错误: {e}")
+        print(f"模型{model_id}错误: {e}")
         return None, info
 
 
 # ==================== 指令 ====================
 @bot.message_handler(commands=['start'])
 def welcome(m):
-    text = "欢迎来到『小鶴神』矩阵终端 V20.0\n━━━━━━━━━━━━━━\n集成204个顶级PC28演算模型\n1-100 双组 | 101-200 杀组 | 201-204 原始\n━━━━━━━━━━━━━━\n输入编号即可预测"
-    if check_auth(m.chat.id):
-        bot.send_message(m.chat.id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
-    else:
-        bot.send_photo(m.chat.id, IMG_LOGO, caption=text, reply_markup=auth_keyboard())
+    text = "欢迎来到『小鶴神』矩阵终端 V22.0\n━━━━━━━━━━━━━━\n集成404个演算模型\n杀组1-200 | 双组201-400 | 原始401-404\n━━━━━━━━━━━━━━\n输入编号即可预测"
+    if check_auth(m.chat.id): bot.send_message(m.chat.id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
+    else: bot.send_photo(m.chat.id, IMG_LOGO, caption=text, reply_markup=auth_keyboard())
 
-@bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 双组胜率排行", "📊 杀组胜率排行", "📈 数据走势分析", "🔍 模型编号查询"])
+@bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 杀组胜率排行", "📊 双组胜率排行", "📈 数据走势分析", "🔍 模型编号查询"])
 def protected_features(m):
-    if not check_auth(m.chat.id):
-        bot.send_message(m.chat.id, "⚠️ 请先登录", reply_markup=auth_keyboard())
-        return
-    if m.text == "🔮 输入编号预测": bot.send_message(m.chat.id, "🎯 输入编号 (1-204)")
-    elif m.text == "📊 双组胜率排行": show_rank(m, "双组")
+    if not check_auth(m.chat.id): bot.send_message(m.chat.id, "⚠️ 请先登录", reply_markup=auth_keyboard()); return
+    if m.text == "🔮 输入编号预测": bot.send_message(m.chat.id, "🎯 输入编号 (1-404)")
     elif m.text == "📊 杀组胜率排行": show_rank(m, "杀组")
+    elif m.text == "📊 双组胜率排行": show_rank(m, "双组")
     elif m.text == "📈 数据走势分析": data_analysis(m)
-    elif m.text == "🔍 模型编号查询": bot.send_message(m.chat.id, "📋 输入编号 (1-204)")
+    elif m.text == "🔍 模型编号查询": bot.send_message(m.chat.id, "📋 输入编号 (1-404)")
 
-@bot.message_handler(func=lambda m: m.text.isdigit() and 1 <= int(m.text) <= 204)
+@bot.message_handler(func=lambda m: m.text.isdigit() and 1 <= int(m.text) <= 404)
 def predict_by_model_id(m):
-    if not check_auth(m.chat.id):
-        bot.send_message(m.chat.id, "⚠️ 请先登录", reply_markup=auth_keyboard())
-        return
+    if not check_auth(m.chat.id): bot.send_message(m.chat.id, "⚠️ 请先登录", reply_markup=auth_keyboard()); return
     model_id = int(m.text)
     history, keno, yl = get_global_clean_data()
-    if not history:
-        bot.send_message(m.chat.id, "❌ 无法获取开奖数据")
-        return
+    if not history: bot.send_message(m.chat.id, "❌ 无法获取开奖数据"); return
     result, info = run_model_pred(model_id, history, keno, yl)
-    if result is None:
-        bot.send_message(m.chat.id, f"❌ 模型{model_id}演算失败")
-        return
+    if result is None: bot.send_message(m.chat.id, f"❌ 模型{model_id}演算失败"); return
     test_len = min(100, len(history) - 1)
-    win_count = 0; streak = 0; max_streak = 0
-    for i in range(1, test_len + 1):
-        try:
-            h_slice = history[i:]
-            if info["type"] == "双组":
-                p = ALL_MODELS[model_id]["func"](h_slice, keno, yl)
-            else:
-                p = ALL_MODELS[model_id]["func"](h_slice)
-            if isinstance(p, tuple): p = p[0]
-            actual = history[i-1]["combination"]
-            if info["type"] == "双组":
-                if actual in p: win_count += 1; streak += 1
-                else: streak = 0
-            else:
-                if actual != p[0]: win_count += 1; streak += 1
-                else: streak = 0
-            max_streak = max(max_streak, streak)
-        except: continue
-    try:
-        next_issue = int(history[0]['nbr']) + 1
-        if info["type"] == "双组":
-            res_list = result[0] if isinstance(result, tuple) else result
-            pred_text = f"🔥 双组: 【 {res_list[0]} + {res_list[1]} 】"
-        else:
-            if isinstance(result, tuple):
-                slay_item = result[0][0]
-                reason = result[1]
-            else:
-                slay_item = result[0]
-                reason = "智能杀组"
-            pred_text = f"🚫 必杀: 【 {slay_item} 】\n📝 {reason}"
-        msg = (f"🎯 {info['name']} ({model_id})\n"
-               f"━━━━━━━━━━━━━━\n"
-               f"📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n"
-               f"🎯 预测: {next_issue}期\n\n"
-               f"{pred_text}\n"
-               f"━━━━━━━━━━━━━━\n"
-               f"📈 近{test_len}期: {win_count/test_len*100:.1f}%\n"
-               f"🔥 连中: {streak} | 最大: {max_streak}\n"
-               f"⚙️ {info['params']}")
-        bot.send_message(m.chat.id, msg, reply_markup=predict_refresh_keyboard(model_id))
-    except Exception as e:
-        bot.send_message(m.chat.id, f"❌ 处理异常: {e}")
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("refresh_"))
-def cb_refresh(c):
-    chat_id = c.message.chat.id
-    if not check_auth(chat_id): bot.answer_callback_query(c.id, "⚠️ 请先登录", show_alert=True); return
-    model_id = int(c.data.split("_")[1])
-    history, keno, yl = get_global_clean_data()
-    if not history: bot.answer_callback_query(c.id, "数据不足", show_alert=True); return
-    result, info = run_model_pred(model_id, history, keno, yl)
-    if result is None: bot.answer_callback_query(c.id, "演算失败", show_alert=True); return
-    test_len = min(100, len(history) - 1)
-    win_count = 0; streak = 0; max_streak = 0
+    win_count = streak = max_streak = 0
     for i in range(1, test_len + 1):
         try:
             h_slice = history[i:]
@@ -600,31 +399,59 @@ def cb_refresh(c):
             res_list = result[0] if isinstance(result, tuple) else result
             pred_text = f"🔥 双组: 【 {res_list[0]} + {res_list[1]} 】"
         else:
-            if isinstance(result, tuple): slay_item = result[0][0]; reason = result[1]
-            else: slay_item = result[0]; reason = "智能杀组"
+            if isinstance(result, tuple): slay_item, reason = result[0][0], result[1]
+            else: slay_item, reason = result[0], "智能杀组"
             pred_text = f"🚫 必杀: 【 {slay_item} 】\n📝 {reason}"
-        msg = (f"🔄 {info['name']} ({model_id})\n"
-               f"━━━━━━━━━━━━━━\n"
-               f"📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n"
-               f"🎯 预测: {next_issue}期\n\n"
-               f"{pred_text}\n"
-               f"━━━━━━━━━━━━━━\n"
-               f"📈 近{test_len}期: {win_count/test_len*100:.1f}%\n"
-               f"🔥 连中: {streak} | 最大: {max_streak}\n"
-               f"⚙️ {info['params']}")
+        msg = (f"🎯 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}")
+        bot.send_message(m.chat.id, msg, reply_markup=predict_refresh_keyboard(model_id))
+    except Exception as e: bot.send_message(m.chat.id, f"❌ 处理异常: {e}")
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("refresh_"))
+def cb_refresh(c):
+    chat_id = c.message.chat.id
+    if not check_auth(chat_id): bot.answer_callback_query(c.id, "⚠️ 请先登录", show_alert=True); return
+    model_id = int(c.data.split("_")[1])
+    history, keno, yl = get_global_clean_data()
+    if not history: bot.answer_callback_query(c.id, "数据不足", show_alert=True); return
+    result, info = run_model_pred(model_id, history, keno, yl)
+    if result is None: bot.answer_callback_query(c.id, "演算失败", show_alert=True); return
+    test_len = min(100, len(history) - 1)
+    win_count = streak = max_streak = 0
+    for i in range(1, test_len + 1):
+        try:
+            h_slice = history[i:]
+            if info["type"] == "双组": p = ALL_MODELS[model_id]["func"](h_slice, keno, yl)
+            else: p = ALL_MODELS[model_id]["func"](h_slice)
+            if isinstance(p, tuple): p = p[0]
+            actual = history[i-1]["combination"]
+            if info["type"] == "双组":
+                if actual in p: win_count += 1; streak += 1
+                else: streak = 0
+            else:
+                if actual != p[0]: win_count += 1; streak += 1
+                else: streak = 0
+            max_streak = max(max_streak, streak)
+        except: continue
+    try:
+        next_issue = int(history[0]['nbr']) + 1
+        if info["type"] == "双组":
+            res_list = result[0] if isinstance(result, tuple) else result
+            pred_text = f"🔥 双组: 【 {res_list[0]} + {res_list[1]} 】"
+        else:
+            if isinstance(result, tuple): slay_item, reason = result[0][0], result[1]
+            else: slay_item, reason = result[0], "智能杀组"
+            pred_text = f"🚫 必杀: 【 {slay_item} 】\n📝 {reason}"
+        msg = (f"🔄 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}")
         bot.edit_message_text(msg, chat_id, c.message.message_id, reply_markup=predict_refresh_keyboard(model_id))
         bot.answer_callback_query(c.id, "✅ 已刷新")
-    except Exception as e:
-        bot.answer_callback_query(c.id, f"错误: {e}", show_alert=True)
+    except Exception as e: bot.answer_callback_query(c.id, f"错误: {e}", show_alert=True)
 
 @bot.callback_query_handler(func=lambda c: c.data == "change_model")
-def cb_change(c): bot.answer_callback_query(c.id); bot.send_message(c.message.chat.id, "🎯 输入新编号 (1-204)")
+def cb_change(c): bot.answer_callback_query(c.id); bot.send_message(c.message.chat.id, "🎯 输入新编号 (1-404)")
 
 def show_rank(m, filter_type=None):
     ranks = get_backtest_rank_top10(filter_type)
-    if not ranks:
-        bot.send_message(m.chat.id, "❌ 数据不足")
-        return
+    if not ranks: bot.send_message(m.chat.id, "❌ 数据不足"); return
     type_name = filter_type if filter_type else "全部"
     txt = f"🏆 TOP10 {type_name} (近{ranks[0]['total']}期)\n━━━━━━━━━━━━━━\n"
     for i, r in enumerate(ranks):
@@ -637,12 +464,11 @@ def data_analysis(m):
     if not history or len(history) < 20: bot.send_message(m.chat.id, "❌ 数据不足"); return
     recent_20 = [h["combination"] for h in history[:20]]
     counter = Counter(recent_20); total = len(recent_20)
-    max_streak = 1; cur_streak = 1
+    max_streak = cur_streak = 1
     for i in range(1, len(recent_20)):
         if recent_20[i] == recent_20[i-1]: cur_streak += 1; max_streak = max(max_streak, cur_streak)
         else: cur_streak = 1
-    all_nums = []; 
-    for h in history[:20]: all_nums.extend(h.get("nums", [int(x) for x in h["number"].split("+")]))
+    all_nums = [x for h in history[:20] for x in h.get("nums", [int(x) for x in h["number"].split("+")])]
     num_counter = Counter(all_nums)
     hot_nums = num_counter.most_common(5); cold_nums = num_counter.most_common()[:-6:-1]
     totals = [h["total"] for h in history[:20]]; avg_total = sum(totals) / len(totals)
@@ -657,7 +483,7 @@ def kf(m): bot.send_message(m.chat.id, f"👤 客服: {CUSTOMER_SERVICE}")
 
 @bot.message_handler(func=lambda m: m.text.startswith("XHS"))
 def auth_proc(m):
-    chat_id = m.chat.id; card = m.text.strip()
+    chat_id, card = m.chat.id, m.text.strip()
     if card in CARD_DATABASE: authorized_users[chat_id] = card; bot.send_message(chat_id, "✅ 登录成功", reply_markup=main_menu_keyboard()); return
     success, msg = check_card_keyt(card, str(chat_id))
     if success: authorized_users[chat_id] = card; CARD_DATABASE.append(card); bot.send_message(chat_id, f"✅ {msg}", reply_markup=main_menu_keyboard())
@@ -687,7 +513,7 @@ def cb_send_qr(c):
 def cb_conf(c): bot.answer_callback_query(c.id, "已提交", show_alert=True); bot.send_message(c.message.chat.id, f"✅ 已登记，联系客服领卡: {CUSTOMER_SERVICE}")
 
 if __name__ == "__main__":
-    print("🚀 小鶴神 V20.0 已启动")
+    print("🚀 小鶴神 V22.0 (404模型) 已启动")
     while True:
         try: bot.infinity_polling(timeout=60, long_polling_timeout=30)
         except requests.exceptions.ReadTimeout: print("超时重连..."); time.sleep(3)
