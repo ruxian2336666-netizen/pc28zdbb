@@ -908,5 +908,20 @@ def cb_conf(c):
 
 
 if __name__ == "__main__":
-    print("🚀 小鶴神终端 V20.0 (204模型) 已启动")
-    bot.infinity_polling()
+    import signal
+    import sys
+    
+    def signal_handler(sig, frame):
+        print("收到终止信号，保存状态后退出...")
+        sys.exit(0)
+    
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    print("🚀 小鶴神终端 V20.0 已启动")
+    
+    while True:
+        try:
+            bot.infinity_polling(timeout=30, long_polling_timeout=10)
+        except Exception as e:
+            print(f"polling异常: {e}")
+            time.sleep(5)
