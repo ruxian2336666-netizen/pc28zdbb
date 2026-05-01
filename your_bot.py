@@ -286,12 +286,12 @@ def generate_dual_models():
         def make_dual_model(k_w, y_w, base_score, mix_mode, use_opposite):
             def dual_model(history, keno_data, yl_data):
                 try:
-                    if not keno_data or len(keno_data) < 2:
+                    if not history or len(history) < 2:
                         return [random.choice(all_forms), random.choice(all_forms)]
                     
                     scores = {cat: float(base_score) for cat in all_forms}
                     
-                    if mix_mode in ["keno_first", "balanced", "random_mix"]:
+                    if mix_mode in ["keno_first", "balanced", "random_mix"] and keno_data and len(keno_data) > 0:
                         try:
                             nbrs_str = keno_data[0].get("nbrs", "")
                             if nbrs_str:
@@ -310,7 +310,7 @@ def generate_dual_models():
                         except:
                             pass
                     
-                    if mix_mode in ["yl_first", "balanced"]:
+                    if mix_mode in ["yl_first", "balanced"] and yl_data:
                         for cat in all_forms:
                             try:
                                 scores[cat] += float(yl_data.get(cat, 0)) * y_w
@@ -361,12 +361,12 @@ def generate_slay_models():
         def make_slay_model(strategy, lookback, threshold):
             def slay_model(history):
                 try:
-                    if len(history) < lookback + 2:
+                    if not history or len(history) < max(lookback, 3):
                         return [random.choice(all_forms)], "数据不足"
                     
-                    recent = [i["combination"] for i in history[:lookback]]
+                    recent = [i.get("combination", "") for i in history[:lookback]]
                     counts = Counter(recent)
-                    curr = recent[0]
+                    curr = recent[0] if recent else random.choice(all_forms)
                     
                     if strategy == "long_dragon":
                         if len(recent) >= 2 and recent[0] == recent[1]:
@@ -867,7 +867,7 @@ def auth_proc(m):
 @bot.callback_query_handler(func=lambda c: c.data == "login_entry")
 def cb_login(c):
     bot.answer_callback_query(c.id)
-    bot.send_message(c.message.chat.id, "⌨️ 请输入 xhs 开头卡密完成登录")
+    bot.send_message(c.message.chat.id, "⌨️ 请输入 XHS 开头卡密完成登录")
 
 
 @bot.callback_query_handler(func=lambda c: c.data == "buy_entry")
