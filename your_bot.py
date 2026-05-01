@@ -795,7 +795,7 @@ def kf(m):
 
 
 # ==================== 卡密验证 ====================
-@bot.message_handler(func=lambda m: m.text.startswith("xhs"))
+@bot.message_handler(func=lambda m: m.text.startswith("XHS"))
 def auth_proc(m):
     chat_id = m.chat.id
     card = m.text.strip()
