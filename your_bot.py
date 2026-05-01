@@ -7,8 +7,8 @@ from telebot import types
 
 # ==================== [1] 核心锁定配置 ====================
 BOT_TOKEN = "8789627493:AAExE8z-tRhrbGvENYVt4dxqWUFf56rrZJQ"
-IMG_LOGO = "https://s41.ax1x.com/2026/05/01/peTE1a9.jpg" # 欢迎语配图
-IMG_WECHAT = "https://s1.ax1x.com/2023/10/31/peTEuKU.png" 
+IMG_LOGO = "https://s41.ax1x.com/2026/05/01/peTZHDU.jpg" # 欢迎语配图
+IMG_WECHAT = "https://s41.ax1x.com/2026/05/01/peTZ7uT.jpg" 
 IMG_ALIPAY = "https://s41.ax1x.com/2026/05/01/peTE1a9.jpg"
 CUSTOMER_SERVICE = "@woaimss"
 
@@ -101,23 +101,23 @@ def welcome(m):
     welcome_text = (
         "**欢迎来到『小鶴神』矩阵终端 V16.0**\n"
         "━━━━━━━━━━━━━━\n"
-        "本终端集成顶级 PC28 演算模型：\n"
+        "本终端集成顶级 PC28 演算模型:\n"
         "✅ **V8-Hybrid** 权重自我修正\n"
         "✅ **PI+PHI 4D** 算力偏移模型\n"
         "✅ **Armor V23** 形态装甲杀组\n"
         "✅ **5y Resonance** 坐标锁定系统\n"
         "━━━━━━━━━━━━━━\n"
-        "💡 请选择下方操作开始体验："
+        "💡 请选择下方操作开始体验:"
     )
     if m.chat.id not in authorized_users:
         bot.send_photo(m.chat.id, IMG_LOGO, caption=welcome_text, reply_markup=auth_keyboard(), parse_mode="Markdown")
     else:
-        bot.send_message(m.chat.id, "✨ **小鹤神主控台已就绪**", reply_markup=main_menu_keyboard())
+        bot.send_message(m.chat.id, "✨ **小鶴神主控台已就绪**", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(func=lambda m: m.text == "🔮 矩阵全量预测" or m.text in ["0", "1", "2", "3", "4"])
 def predict_dispatch(m):
     if m.chat.id not in authorized_users:
-        bot.send_message(m.chat.id, "⚠️ 请先登录！", reply_markup=auth_keyboard())
+        bot.send_message(m.chat.id, "⚠️ 请先登录!", reply_markup=auth_keyboard())
         return
     
     # 自动执行全量预测
@@ -139,7 +139,7 @@ def predict_dispatch(m):
                f"• Armor 杀: `{algo_v23_armor(raw_kj)}`\n"
                f"• 5y 共振: `{algo_5y_resonance(raw_kj)}`\n"
                f"━━━━━━━━━━━━━━\n"
-               f"📈 状态：`算法同步完成`")
+               f"📈 状态:`算法同步完成`")
         bot.send_message(m.chat.id, msg, parse_mode="Markdown")
     except:
         bot.send_message(m.chat.id, "❌ 演算链路故障")
@@ -161,26 +161,26 @@ def buy_panel(m):
            types.InlineKeyboardButton("📅 周卡 - 18.88", callback_data="p_18.88"),
            types.InlineKeyboardButton("🌙 月卡 - 38.88", callback_data="p_38.88"),
            types.InlineKeyboardButton("👑 永久卡 - 88.88", callback_data="p_88.88"))
-    bot.send_message(m.chat.id, "💎 **请选择授权套餐：**", reply_markup=mk)
+    bot.send_message(m.chat.id, "💎 **请选择授权套餐:**", reply_markup=mk)
 
 @bot.message_handler(func=lambda m: m.text == "👤 联系人工客服")
 def kf(m):
-    bot.send_message(m.chat.id, f"👤 **官方客服通道**\n\n如有支付问题或大额充值，请联系：{CUSTOMER_SERVICE}")
+    bot.send_message(m.chat.id, f"👤 **官方客服通道**\n\n如有支付问题或大额充值,请联系:{CUSTOMER_SERVICE}")
 
 # ==================== [5] 支付与回调 (修复按钮转圈) ====================
 
 @bot.callback_query_handler(func=lambda c: c.data == "login_entry")
 def cb_login(c):
     bot.answer_callback_query(c.id)
-    bot.send_message(c.message.chat.id, "⌨️ 请在下方输入 `xhs` 开头的卡密：")
+    bot.send_message(c.message.chat.id, "⌨️ 请在下方输入 `xhs` 开头的卡密:")
 
 @bot.message_handler(func=lambda m: m.text.startswith("xhs"))
 def auth_proc(m):
     if m.text.strip() in CARD_DATABASE:
         authorized_users[m.chat.id] = m.text.strip()
-        bot.send_message(m.chat.id, "✅ **登录成功，主控台已开启。**", reply_markup=main_menu_keyboard())
+        bot.send_message(m.chat.id, "✅ **登录成功,主控台已开启。**", reply_markup=main_menu_keyboard())
     else:
-        bot.send_message(m.chat.id, "❌ 卡密无效！")
+        bot.send_message(m.chat.id, "❌ 卡密无效!")
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("p_"))
 def cb_pay_select(c):
@@ -189,7 +189,7 @@ def cb_pay_select(c):
     mk = types.InlineKeyboardMarkup()
     mk.add(types.InlineKeyboardButton("微信支付", callback_data=f"qr_wx_{price}"),
            types.InlineKeyboardButton("支付宝支付", callback_data=f"qr_ali_{price}"))
-    bot.edit_message_text(f"💰 待支付：{price} 元\n请选择支付通道：", c.message.chat.id, c.message.message_id, reply_markup=mk)
+    bot.edit_message_text(f"💰 待支付:{price} 元\n请选择支付通道:", c.message.chat.id, c.message.message_id, reply_markup=mk)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("qr_"))
 def cb_send_qr(c):
@@ -203,8 +203,8 @@ def cb_send_qr(c):
 
 @bot.callback_query_handler(func=lambda c: c.data == "conf_pay")
 def cb_conf(c):
-    bot.answer_callback_query(c.id, "已记录，请发截图", show_alert=True)
-    bot.send_message(c.message.chat.id, f"👤 **请发送截图至：** {CUSTOMER_SERVICE}")
+    bot.answer_callback_query(c.id, "已记录,请发截图", show_alert=True)
+    bot.send_message(c.message.chat.id, f"👤 **请发送截图至:** {CUSTOMER_SERVICE}")
 
 if __name__ == "__main__":
     print("🚀 小鶴神终端 V16.0 巡航中...")
