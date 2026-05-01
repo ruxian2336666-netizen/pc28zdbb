@@ -200,10 +200,10 @@ def algo_5y_resonance(history):
     except: return ["大单","小双"]
 
 
-# ==================== 404个模型 ====================
+# ==================== 604个模型 ====================
 ALL_MODELS = {}
 
-# --- 200个杀组模型 (1-200) ---
+# --- 杀组核心逻辑 ---
 def master_slay_logic(history, config):
     if not history or len(history) < config['min_len']:
         return ["小单"], "基础数据不足"
@@ -235,18 +235,7 @@ def master_slay_logic(history, config):
         reason = "形态对称性排除"
     return [target], reason
 
-for i in range(1, 201):
-    if i <= 40: conf = {'mode': "COLD", 'lookback': 10 + i, 'min_len': 15, 'desc': "冷态流"}
-    elif i <= 80: conf = {'mode': "HOT", 'lookback': 20 + (i-40), 'min_len': 25, 'desc': "热态流"}
-    elif i <= 120: conf = {'mode': "DRAGON", 'lookback': 5, 'threshold': 2 + (i % 3), 'min_len': 10, 'desc': "截龙流"}
-    elif i <= 160: conf = {'mode': "CYCLE", 'mod_val': 3 + (i % 7), 'lookback': 1, 'min_len': 5, 'desc': "周期流"}
-    else: conf = {'mode': "REVERSE", 'lookback': 1, 'min_len': 5, 'desc': "对称流"}
-    ALL_MODELS[i] = {
-        "func": lambda h, c=conf: master_slay_logic(h, c),
-        "info": {"id": i, "name": f"{conf['desc']} M{i}", "type": "杀组", "params": f"L:{conf['lookback']} M:{conf['mode']}"}
-    }
-
-# --- 200个双组模型 (201-400) ---
+# --- 双组核心逻辑 ---
 def master_dual_logic(history, keno, yl, config):
     all_forms = ["大单", "小单", "大双", "小双"]
     if not history or not keno: return [random.choice(all_forms), random.choice(all_forms)]
@@ -262,22 +251,35 @@ def master_dual_logic(history, keno, yl, config):
     for cat in all_forms: scores[cat] += recent.count(cat) * config['trend_weight']
     return [x[0] for x in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:2]]
 
-for i in range(1, 201):
-    mid = i + 200
-    if i <= 50: conf = {'keno_weight': 60 + (i * 0.5), 'yl_weight': 1.5, 'trend_weight': 5, 'trend_depth': 5, 'keno_indices': [1, 4, 7, 10, 13, 16], 'desc': "Keno领先型"}
-    elif i <= 100: conf = {'keno_weight': 30, 'yl_weight': 3.0 + (i * 0.05), 'trend_weight': 10, 'trend_depth': 10, 'keno_indices': [0, 2, 5, 8, 11, 14], 'desc': "遗漏补偿型"}
-    elif i <= 150: conf = {'keno_weight': 20, 'yl_weight': 1.0, 'trend_weight': 15 + (i * 0.2), 'trend_depth': 15 + (i % 5), 'keno_indices': [3, 6, 9, 12, 15, 18], 'desc': "趋势惯性型"}
+# --- 300个杀组模型 (1-300) ---
+for i in range(1, 301):
+    if i <= 60: conf = {'mode': "COLD", 'lookback': 10 + i, 'min_len': 15, 'desc': "冷态流"}
+    elif i <= 120: conf = {'mode': "HOT", 'lookback': 20 + (i-60), 'min_len': 25, 'desc': "热态流"}
+    elif i <= 180: conf = {'mode': "DRAGON", 'lookback': 5, 'threshold': 2 + (i % 4), 'min_len': 10, 'desc': "截龙流"}
+    elif i <= 240: conf = {'mode': "CYCLE", 'mod_val': 3 + (i % 9), 'lookback': 1, 'min_len': 5, 'desc': "周期流"}
+    else: conf = {'mode': "REVERSE", 'lookback': 1, 'min_len': 5, 'desc': "对称流"}
+    ALL_MODELS[i] = {
+        "func": lambda h, c=conf: master_slay_logic(h, c),
+        "info": {"id": i, "name": f"杀组M{i}", "type": "杀组", "params": f"L:{conf['lookback']} M:{conf['mode']}"}
+    }
+
+# --- 300个双组模型 (301-600) ---
+for i in range(1, 301):
+    mid = i + 300
+    if i <= 75: conf = {'keno_weight': 60 + (i * 0.4), 'yl_weight': 1.5, 'trend_weight': 5, 'trend_depth': 5, 'keno_indices': [1, 4, 7, 10, 13, 16], 'desc': "Keno领先型"}
+    elif i <= 150: conf = {'keno_weight': 30, 'yl_weight': 3.0 + (i * 0.04), 'trend_weight': 10, 'trend_depth': 10, 'keno_indices': [0, 2, 5, 8, 11, 14], 'desc': "遗漏补偿型"}
+    elif i <= 225: conf = {'keno_weight': 20, 'yl_weight': 1.0, 'trend_weight': 15 + (i * 0.15), 'trend_depth': 15 + (i % 7), 'keno_indices': [3, 6, 9, 12, 15, 18], 'desc': "趋势惯性型"}
     else: conf = {'keno_weight': 45, 'yl_weight': 2.5, 'trend_weight': 12, 'trend_depth': 8, 'keno_indices': random.sample(range(20), 6), 'desc': "混沌均衡型"}
     ALL_MODELS[mid] = {
         "func": lambda h, k, y, c=conf: master_dual_logic(h, k, y, c),
-        "info": {"id": mid, "name": f"{conf['desc']} D{i}", "type": "双组", "params": f"K:{conf['keno_weight']:.1f} Y:{conf['yl_weight']:.2f} T:{conf['trend_weight']:.1f}"}
+        "info": {"id": mid, "name": f"双组D{i}", "type": "双组", "params": f"K:{conf['keno_weight']:.1f} Y:{conf['yl_weight']:.2f} T:{conf['trend_weight']:.1f}"}
     }
 
-# --- 4个原始算法 (401-404) ---
-ALL_MODELS[401] = {"func": lambda h, k=None, y=None: algo_v8_hybrid(h, k, y), "info": {"id": 401, "name": "V8-Hybrid 双组(原)", "type": "双组", "params": "原始权重"}}
-ALL_MODELS[402] = {"func": lambda h, k=None, y=None: algo_4d_pi(h), "info": {"id": 402, "name": "4D-PI+PHI 双组(原)", "type": "双组", "params": "原始算力"}}
-ALL_MODELS[403] = {"func": lambda h, k=None, y=None: algo_v23_armor(h), "info": {"id": 403, "name": "Armor V23 杀组(原)", "type": "杀组", "params": "原始装甲"}}
-ALL_MODELS[404] = {"func": lambda h, k=None, y=None: algo_5y_resonance(h), "info": {"id": 404, "name": "5y Resonance 双组(原)", "type": "双组", "params": "原始共振"}}
+# --- 4个原始算法 (601-604) ---
+ALL_MODELS[601] = {"func": lambda h, k=None, y=None: algo_v8_hybrid(h, k, y), "info": {"id": 601, "name": "V8-Hybrid 双组(原)", "type": "双组", "params": "原始权重"}}
+ALL_MODELS[602] = {"func": lambda h, k=None, y=None: algo_4d_pi(h), "info": {"id": 602, "name": "4D-PI+PHI 双组(原)", "type": "双组", "params": "原始算力"}}
+ALL_MODELS[603] = {"func": lambda h, k=None, y=None: algo_v23_armor(h), "info": {"id": 603, "name": "Armor V23 杀组(原)", "type": "杀组", "params": "原始装甲"}}
+ALL_MODELS[604] = {"func": lambda h, k=None, y=None: algo_5y_resonance(h), "info": {"id": 604, "name": "5y Resonance 双组(原)", "type": "双组", "params": "原始共振"}}
 
 
 # ==================== 排行榜 ====================
@@ -353,22 +355,24 @@ def run_model_pred(model_id, history, keno, yl):
 
 
 # ==================== 指令 ====================
+MAX_MODEL_ID = 604
+
 @bot.message_handler(commands=['start'])
 def welcome(m):
-    text = "欢迎来到『小鶴神』矩阵终端 V22.0\n━━━━━━━━━━━━━━\n集成404个演算模型\n杀组1-200 | 双组201-400 | 原始401-404\n━━━━━━━━━━━━━━\n输入编号即可预测"
+    text = f"欢迎来到『小鶴神』矩阵终端 V23.0\n━━━━━━━━━━━━━━\n集成{MAX_MODEL_ID}个演算模型\n杀组1-300 | 双组301-600 | 原始601-604\n━━━━━━━━━━━━━━\n输入编号即可预测"
     if check_auth(m.chat.id): bot.send_message(m.chat.id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
     else: bot.send_photo(m.chat.id, IMG_LOGO, caption=text, reply_markup=auth_keyboard())
 
 @bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 杀组胜率排行", "📊 双组胜率排行", "📈 数据走势分析", "🔍 模型编号查询"])
 def protected_features(m):
     if not check_auth(m.chat.id): bot.send_message(m.chat.id, "⚠️ 请先登录", reply_markup=auth_keyboard()); return
-    if m.text == "🔮 输入编号预测": bot.send_message(m.chat.id, "🎯 输入编号 (1-404)")
+    if m.text == "🔮 输入编号预测": bot.send_message(m.chat.id, f"🎯 输入编号 (1-{MAX_MODEL_ID})")
     elif m.text == "📊 杀组胜率排行": show_rank(m, "杀组")
     elif m.text == "📊 双组胜率排行": show_rank(m, "双组")
     elif m.text == "📈 数据走势分析": data_analysis(m)
-    elif m.text == "🔍 模型编号查询": bot.send_message(m.chat.id, "📋 输入编号 (1-404)")
+    elif m.text == "🔍 模型编号查询": bot.send_message(m.chat.id, f"📋 输入编号 (1-{MAX_MODEL_ID})")
 
-@bot.message_handler(func=lambda m: m.text.isdigit() and 1 <= int(m.text) <= 404)
+@bot.message_handler(func=lambda m: m.text.isdigit() and 1 <= int(m.text) <= MAX_MODEL_ID)
 def predict_by_model_id(m):
     if not check_auth(m.chat.id): bot.send_message(m.chat.id, "⚠️ 请先登录", reply_markup=auth_keyboard()); return
     model_id = int(m.text)
@@ -447,7 +451,7 @@ def cb_refresh(c):
     except Exception as e: bot.answer_callback_query(c.id, f"错误: {e}", show_alert=True)
 
 @bot.callback_query_handler(func=lambda c: c.data == "change_model")
-def cb_change(c): bot.answer_callback_query(c.id); bot.send_message(c.message.chat.id, "🎯 输入新编号 (1-404)")
+def cb_change(c): bot.answer_callback_query(c.id); bot.send_message(c.message.chat.id, f"🎯 输入新编号 (1-{MAX_MODEL_ID})")
 
 def show_rank(m, filter_type=None):
     ranks = get_backtest_rank_top10(filter_type)
@@ -513,7 +517,7 @@ def cb_send_qr(c):
 def cb_conf(c): bot.answer_callback_query(c.id, "已提交", show_alert=True); bot.send_message(c.message.chat.id, f"✅ 已登记，联系客服领卡: {CUSTOMER_SERVICE}")
 
 if __name__ == "__main__":
-    print("🚀 小鶴神 V22.0 (404模型) 已启动")
+    print(f"🚀 小鶴神 V23.0 ({MAX_MODEL_ID}模型) 已启动")
     while True:
         try: bot.infinity_polling(timeout=60, long_polling_timeout=30)
         except requests.exceptions.ReadTimeout: print("超时重连..."); time.sleep(3)
