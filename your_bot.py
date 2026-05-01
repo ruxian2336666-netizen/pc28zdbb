@@ -7,6 +7,73 @@ from telebot import types
 from collections import Counter
 from datetime import datetime
 
+# ==================== 卡密通验证系统 ====================
+KEYT_SERVER = "https://www.keyt.cn/kami/xianhe1314520/check.php"
+KEYT_APP = "xianhxianhxianhexianhexianhe"
+KEYT_SIGN_KEY = "xianhe1314"
+
+def calc_sign(data):
+    res = ""
+    key_len = len(KEYT_SIGN_KEY)
+    for i, ch in enumerate(data):
+        ch_asc = ord(ch)
+        kh_asc = ord(KEYT_SIGN_KEY[i % key_len])
+        v = (ch_asc + kh_asc) % 256
+        res += format(v, '02x')
+    return res
+
+def verify_response(raw):
+    pos = raw.find("|sign=")
+    if pos == -1:
+        return None
+    body = raw[:pos]
+    sign = raw[pos + 6:]
+    local_sign = calc_sign(body)
+    if local_sign != sign:
+        return None
+    last_pipe = body.rfind("|")
+    if last_pipe == -1:
+        return None
+    return body[:last_pipe]
+
+def check_card_keyt(card, user_id):
+    try:
+        url = f"{KEYT_SERVER}?card={card}&mac={user_id}&app={KEYT_APP}&heart=1&t={int(time.time())}"
+        resp = requests.get(url, timeout=10)
+        raw = resp.text
+
+        biz = verify_response(raw)
+        if not biz:
+            return False, "签名校验失败"
+
+        parts = biz.split("|")
+
+        if len(parts) >= 2 and parts[1] == "permanent":
+            return True, "终身有效"
+
+        if len(parts) >= 3 and parts[0] == "ok":
+            days = parts[2]
+            return True, f"验证通过，剩余{days}天"
+
+        if len(parts) == 2 and parts[1] == "valid":
+            return True, "验证通过"
+
+        errors = {
+            "invalid_card": "卡密无效",
+            "expired": "卡密已过期",
+            "banned": "卡密已被禁用",
+            "device_mismatch": "设备不匹配",
+            "missing_params": "参数不完整"
+        }
+        for key, msg in errors.items():
+            if key in biz:
+                return False, msg
+
+        return False, biz
+
+    except Exception as e:
+        return False, f"验证异常: {e}"
+
 # ==================== 核心配置 ====================
 BOT_TOKEN = "8789627493:AAExE8z-tRhrbGvENYVt4dxqWUFf56rrZJQ"
 IMG_LOGO = "https://s41.ax1x.com/2026/05/01/peTZHDU.jpg"
@@ -240,58 +307,114 @@ def algo_5y_resonance(history):
         return ["大单", "小双"]
 
 
-# ==================== 胜率排行 ====================
+# ==================== 胜率排行（上限200期 + 连中） ====================
 def get_backtest_rank():
     history, keno, yl = get_global_clean_data()
     if len(history) < 25:
         return []
 
-    test_len = min(25, len(history) - 1)
+    MAX_BACKTEST = min(200, len(history) - 1)
     ranks = []
 
-    # V8-Hybrid 双组回测
+    # V8-Hybrid
     win = 0
-    for i in range(1, test_len + 1):
+    streak = 0
+    max_streak = 0
+    for i in range(1, MAX_BACKTEST + 1):
         try:
             dual, _ = algo_v8_hybrid(history[i:], keno, yl)
             if history[i - 1]["combination"] in dual:
                 win += 1
+                streak += 1
+                max_streak = max(max_streak, streak)
+            else:
+                streak = 0
         except:
             continue
-    ranks.append({"name": "V8-Hybrid 双组", "win": win, "total": test_len, "rate": (win / test_len) * 100, "type": "双组"})
+    ranks.append({
+        "name": "V8-Hybrid 双组",
+        "win": win,
+        "total": MAX_BACKTEST,
+        "rate": (win / MAX_BACKTEST) * 100,
+        "type": "双组",
+        "streak": max_streak,
+        "current_streak": streak
+    })
 
-    # 4D-PI+PHI 双组回测
+    # 4D-PI+PHI
     win = 0
-    for i in range(1, test_len + 1):
+    streak = 0
+    max_streak = 0
+    for i in range(1, MAX_BACKTEST + 1):
         try:
             dual = algo_4d_pi(history[i:])
             if history[i - 1]["combination"] in dual:
                 win += 1
+                streak += 1
+                max_streak = max(max_streak, streak)
+            else:
+                streak = 0
         except:
             continue
-    ranks.append({"name": "4D-PI+PHI 双组", "win": win, "total": test_len, "rate": (win / test_len) * 100, "type": "双组"})
+    ranks.append({
+        "name": "4D-PI+PHI 双组",
+        "win": win,
+        "total": MAX_BACKTEST,
+        "rate": (win / MAX_BACKTEST) * 100,
+        "type": "双组",
+        "streak": max_streak,
+        "current_streak": streak
+    })
 
-    # Armor V23 杀组回测
+    # Armor V23 杀组
     win = 0
-    for i in range(1, test_len + 1):
+    streak = 0
+    max_streak = 0
+    for i in range(1, MAX_BACKTEST + 1):
         try:
             slay, _ = algo_v23_armor(history[i:])
             if history[i - 1]["combination"] != slay[0]:
                 win += 1
+                streak += 1
+                max_streak = max(max_streak, streak)
+            else:
+                streak = 0
         except:
             continue
-    ranks.append({"name": "Armor V23 杀组", "win": win, "total": test_len, "rate": (win / test_len) * 100, "type": "杀组"})
+    ranks.append({
+        "name": "Armor V23 杀组",
+        "win": win,
+        "total": MAX_BACKTEST,
+        "rate": (win / MAX_BACKTEST) * 100,
+        "type": "杀组",
+        "streak": max_streak,
+        "current_streak": streak
+    })
 
-    # 5y Resonance 双组回测
+    # 5y Resonance
     win = 0
-    for i in range(1, test_len + 1):
+    streak = 0
+    max_streak = 0
+    for i in range(1, MAX_BACKTEST + 1):
         try:
             dual = algo_5y_resonance(history[i:])
             if history[i - 1]["combination"] in dual:
                 win += 1
+                streak += 1
+                max_streak = max(max_streak, streak)
+            else:
+                streak = 0
         except:
             continue
-    ranks.append({"name": "5y Resonance 双组", "win": win, "total": test_len, "rate": (win / test_len) * 100, "type": "双组"})
+    ranks.append({
+        "name": "5y Resonance 双组",
+        "win": win,
+        "total": MAX_BACKTEST,
+        "rate": (win / MAX_BACKTEST) * 100,
+        "type": "双组",
+        "streak": max_streak,
+        "current_streak": streak
+    })
 
     return sorted(ranks, key=lambda x: x["win"], reverse=True)
 
@@ -338,6 +461,13 @@ def buy_keyboard():
     return mk
 
 
+# ==================== 统一授权检查 ====================
+def check_auth(chat_id):
+    if chat_id not in authorized_users:
+        return False
+    return True
+
+
 # ==================== 指令处理 ====================
 @bot.message_handler(commands=['start'])
 def welcome(m):
@@ -352,17 +482,30 @@ def welcome(m):
         "━━━━━━━━━━━━━━\n"
         "点击【选择算法预测】开始"
     )
-    if m.chat.id not in authorized_users:
-        bot.send_photo(m.chat.id, IMG_LOGO, caption=text, reply_markup=auth_keyboard(), parse_mode="Markdown")
-    else:
+    if check_auth(m.chat.id):
         bot.send_message(m.chat.id, "✨ 小鶴神主控台已就绪", reply_markup=main_menu_keyboard())
+    else:
+        bot.send_photo(m.chat.id, IMG_LOGO, caption=text, reply_markup=auth_keyboard(), parse_mode="Markdown")
 
 
-@bot.message_handler(func=lambda m: m.text == "🔮 选择算法预测")
-def algo_select(m):
-    if m.chat.id not in authorized_users:
-        bot.send_message(m.chat.id, "⚠️ 请先登录授权", reply_markup=auth_keyboard())
+# ========== 所有功能入口统一拦截 ==========
+@bot.message_handler(func=lambda m: m.text in ["🔮 选择算法预测", "📊 算法胜率排行", "📈 数据走势分析", "⚙️ 模型算法说明"])
+def protected_features(m):
+    if not check_auth(m.chat.id):
+        bot.send_message(m.chat.id, "⚠️ 此功能需要登录授权", reply_markup=auth_keyboard())
         return
+
+    if m.text == "🔮 选择算法预测":
+        algo_select(m)
+    elif m.text == "📊 算法胜率排行":
+        show_rank(m)
+    elif m.text == "📈 数据走势分析":
+        data_analysis(m)
+    elif m.text == "⚙️ 模型算法说明":
+        algo_explain(m)
+
+
+def algo_select(m):
     bot.send_message(
         m.chat.id,
         "🎯 **请选择预测算法**\n\n"
@@ -375,8 +518,12 @@ def algo_select(m):
     )
 
 
+# ========== 回调按钮 ==========
 @bot.callback_query_handler(func=lambda c: c.data.startswith("algo_"))
 def cb_algo_select(c):
+    if not check_auth(c.message.chat.id):
+        bot.answer_callback_query(c.id, "⚠️ 请先登录授权", show_alert=True)
+        return
     bot.answer_callback_query(c.id)
     algo_num = int(c.data.split("_")[1])
     algo_names = {1: "V8-Hybrid 双组", 2: "4D-PI+PHI 双组", 3: "Armor V23 杀组", 4: "5y Resonance 双组"}
@@ -396,13 +543,13 @@ def cb_algo_select(c):
 
 @bot.callback_query_handler(func=lambda c: c.data == "start_predict")
 def cb_start_predict(c):
-    bot.answer_callback_query(c.id)
     chat_id = c.message.chat.id
 
-    if chat_id not in authorized_users:
-        bot.send_message(chat_id, "⚠️ 请先登录授权")
+    if not check_auth(chat_id):
+        bot.answer_callback_query(c.id, "⚠️ 请先登录授权", show_alert=True)
         return
 
+    bot.answer_callback_query(c.id)
     algo_num = user_algo_choice.get(chat_id, 1)
 
     history, keno, yl = get_global_clean_data()
@@ -417,19 +564,26 @@ def cb_start_predict(c):
 
     bot.delete_message(chat_id, c.message.message_id)
 
-    # 回测近25期
-    test_len = min(25, len(history) - 1)
+    test_len = min(200, len(history) - 1)
 
     if algo_num == 1:
         dual, hits = algo_v8_hybrid(history, keno, yl)
         win_count = 0
+        current_streak = 0
+        max_streak = 0
+        streak = 0
         for i in range(1, test_len + 1):
             try:
                 d, _ = algo_v8_hybrid(history[i:], keno, yl)
                 if history[i - 1]["combination"] in d:
                     win_count += 1
+                    streak += 1
+                    max_streak = max(max_streak, streak)
+                else:
+                    streak = 0
             except:
                 continue
+        current_streak = streak
         msg = (
             f"⚡ **V8-Hybrid 双组预测**\n"
             f"━━━━━━━━━━━━━━\n"
@@ -437,6 +591,7 @@ def cb_start_predict(c):
             f"🎯 预测: {next_issue}期\n\n"
             f"🔥 双组推荐: 【 **{dual[0]} + {dual[1]}** 】\n"
             f"🚦 近10期命中: {hits}次\n"
+            f"🔥 当前连中: {current_streak}期 | 最大连中: {max_streak}期\n"
             f"📈 近{test_len}期胜率: {win_count}/{test_len} ({win_count/test_len*100:.1f}%)\n"
             f"🛠️ 模式: 权重自我修正\n"
             f"━━━━━━━━━━━━━━\n"
@@ -446,19 +601,28 @@ def cb_start_predict(c):
     elif algo_num == 2:
         dual = algo_4d_pi(history)
         win_count = 0
+        current_streak = 0
+        max_streak = 0
+        streak = 0
         for i in range(1, test_len + 1):
             try:
                 d = algo_4d_pi(history[i:])
                 if history[i - 1]["combination"] in d:
                     win_count += 1
+                    streak += 1
+                    max_streak = max(max_streak, streak)
+                else:
+                    streak = 0
             except:
                 continue
+        current_streak = streak
         msg = (
             f"🔮 **4D-PI+PHI 双组预测**\n"
             f"━━━━━━━━━━━━━━\n"
             f"📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n"
             f"🎯 预测: {next_issue}期\n\n"
             f"🔥 双组推荐: 【 **{dual[0]} + {dual[1]}** 】\n"
+            f"🔥 当前连中: {current_streak}期 | 最大连中: {max_streak}期\n"
             f"📈 近{test_len}期胜率: {win_count}/{test_len} ({win_count/test_len*100:.1f}%)\n"
             f"🧠 逻辑: 黄金分割+圆周率算力偏移\n"
             f"━━━━━━━━━━━━━━\n"
@@ -468,13 +632,21 @@ def cb_start_predict(c):
     elif algo_num == 3:
         slay, reason = algo_v23_armor(history)
         win_count = 0
+        current_streak = 0
+        max_streak = 0
+        streak = 0
         for i in range(1, test_len + 1):
             try:
                 s, _ = algo_v23_armor(history[i:])
                 if history[i - 1]["combination"] != s[0]:
                     win_count += 1
+                    streak += 1
+                    max_streak = max(max_streak, streak)
+                else:
+                    streak = 0
             except:
                 continue
+        current_streak = streak
         msg = (
             f"🛡️ **Armor V23 杀组预测**\n"
             f"━━━━━━━━━━━━━━\n"
@@ -482,6 +654,7 @@ def cb_start_predict(c):
             f"🎯 预测: {next_issue}期\n\n"
             f"🚫 下期必杀: 【 **{slay[0]}** 】\n"
             f"📝 理由: {reason}\n"
+            f"🔥 当前连中: {current_streak}期 | 最大连中: {max_streak}期\n"
             f"📈 近{test_len}期杀对率: {win_count}/{test_len} ({win_count/test_len*100:.1f}%)\n"
             f"━━━━━━━━━━━━━━\n"
             f"💡 排除该形态，剩下3选1"
@@ -490,13 +663,21 @@ def cb_start_predict(c):
     elif algo_num == 4:
         dual = algo_5y_resonance(history)
         win_count = 0
+        current_streak = 0
+        max_streak = 0
+        streak = 0
         for i in range(1, test_len + 1):
             try:
                 d = algo_5y_resonance(history[i:])
                 if history[i - 1]["combination"] in d:
                     win_count += 1
+                    streak += 1
+                    max_streak = max(max_streak, streak)
+                else:
+                    streak = 0
             except:
                 continue
+        current_streak = streak
         y_list = []
         for i in history[:15]:
             nums = i.get("nums", [int(x) for x in i["number"].split("+")])
@@ -511,6 +692,7 @@ def cb_start_predict(c):
             f"🎯 预测: {next_issue}期\n\n"
             f"🧭 5y坐标: 5y{pred_y_idx}\n"
             f"🔥 双组推荐: 【 **{dual[0]} + {dual[1]}** 】\n"
+            f"🔥 当前连中: {current_streak}期 | 最大连中: {max_streak}期\n"
             f"📈 近{test_len}期胜率: {win_count}/{test_len} ({win_count/test_len*100:.1f}%)\n"
             f"🧠 逻辑: 漂移修正+属性共振\n"
             f"━━━━━━━━━━━━━━\n"
@@ -521,11 +703,7 @@ def cb_start_predict(c):
     bot.send_message(chat_id, "🔄 可继续选择算法或查看其他功能", reply_markup=main_menu_keyboard())
 
 
-@bot.message_handler(func=lambda m: m.text == "📊 算法胜率排行")
 def show_rank(m):
-    if m.chat.id not in authorized_users:
-        bot.send_message(m.chat.id, "⚠️ 请先登录授权")
-        return
     ranks = get_backtest_rank()
     if not ranks:
         bot.send_message(m.chat.id, "❌ 数据不足，无法生成排行（需25期以上）")
@@ -535,16 +713,11 @@ def show_rank(m):
         medal = ["🥇", "🥈", "🥉", "🎖️"][i] if i < 4 else "📊"
         note = "(双组命中)" if r["type"] == "双组" else "(杀对立)"
         txt += f"{medal} {r['name']}：{r['rate']:.1f}% ({r['win']}/{r['total']}) {note}\n"
-    txt += "━━━━━━━━━━━━━━\n⚠️ 杀组排除1项=75%理论，双组=50%理论"
+        txt += f"   🔥 最大连中: {r['streak']}期 | 当前连中: {r['current_streak']}期\n"
     bot.send_message(m.chat.id, txt, parse_mode="Markdown")
 
 
-@bot.message_handler(func=lambda m: m.text == "📈 数据走势分析")
 def data_analysis(m):
-    if m.chat.id not in authorized_users:
-        bot.send_message(m.chat.id, "⚠️ 请先登录授权")
-        return
-
     history, _, _ = get_global_clean_data()
     if not history or len(history) < 20:
         bot.send_message(m.chat.id, "❌ 数据不足，需至少20期")
@@ -586,17 +759,11 @@ def data_analysis(m):
         f"📊 平均和值: {avg_total:.1f}\n\n"
         f"🔴 热门数字: {', '.join([str(n[0]) for n in hot_nums])}\n"
         f"🔵 冷门数字: {', '.join([str(n[0]) for n in cold_nums])}\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"⚠️ 历史数据仅作参考"
     )
     bot.send_message(m.chat.id, txt, parse_mode="Markdown")
 
 
-@bot.message_handler(func=lambda m: m.text == "⚙️ 模型算法说明")
 def algo_explain(m):
-    if m.chat.id not in authorized_users:
-        bot.send_message(m.chat.id, "⚠️ 请先登录授权")
-        return
     text = (
         "⚙️ **模型算法详细说明**\n"
         "━━━━━━━━━━━━━━\n"
@@ -613,8 +780,6 @@ def algo_explain(m):
         "排除一个形态，剩下3选1\n\n"
         "4️⃣ 5y Resonance 双组预测\n"
         "5y坐标漂移+属性共振锁定\n"
-        "━━━━━━━━━━━━━━\n"
-        "⚠️ 历史回测仅作参考"
     )
     bot.send_message(m.chat.id, text, parse_mode="Markdown")
 
@@ -626,7 +791,28 @@ def buy_panel(m):
 
 @bot.message_handler(func=lambda m: m.text == "👤 联系人工客服")
 def kf(m):
-    bot.send_message(m.chat.id, f"👤 官方人工客服\n━━━━━━━━━━━━━━\n如有支付、卡密问题请联系：{CUSTOMER_SERVICE}")
+    bot.send_message(m.chat.id, f"👤 官方人工客服\n如有支付、卡密问题请联系：{CUSTOMER_SERVICE}")
+
+
+# ==================== 卡密验证 ====================
+@bot.message_handler(func=lambda m: m.text.startswith("xhs"))
+def auth_proc(m):
+    chat_id = m.chat.id
+    card = m.text.strip()
+
+    if card in CARD_DATABASE:
+        authorized_users[chat_id] = card
+        bot.send_message(chat_id, "✅ 登录成功！主控台已解锁", reply_markup=main_menu_keyboard())
+        return
+
+    success, msg = check_card_keyt(card, str(chat_id))
+
+    if success:
+        authorized_users[chat_id] = card
+        CARD_DATABASE.append(card)
+        bot.send_message(chat_id, f"✅ 登录成功！{msg}", reply_markup=main_menu_keyboard())
+    else:
+        bot.send_message(chat_id, f"❌ {msg}")
 
 
 # ==================== 回调事件 ====================
@@ -640,15 +826,6 @@ def cb_login(c):
 def cb_buy_entry(c):
     bot.answer_callback_query(c.id)
     bot.send_message(c.message.chat.id, "💎 请选择下方套餐", reply_markup=buy_keyboard())
-
-
-@bot.message_handler(func=lambda m: m.text.startswith("xhs"))
-def auth_proc(m):
-    if m.text.strip() in CARD_DATABASE:
-        authorized_users[m.chat.id] = m.text.strip()
-        bot.send_message(m.chat.id, "✅ 登录成功！主控台已解锁", reply_markup=main_menu_keyboard())
-    else:
-        bot.send_message(m.chat.id, "❌ 卡密无效或已过期")
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("p_"))
