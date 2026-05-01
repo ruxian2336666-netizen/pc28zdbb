@@ -8,6 +8,8 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
+    
     steps:
       - name: 检查代码
         uses: actions/checkout@v3
@@ -21,5 +23,4 @@ jobs:
         run: pip install pyTelegramBotAPI requests
 
       - name: 运行机器人
-        # 这里一定要加 || true，防止报错直接让 Action 显示失败但不输出日志
-        run: python your_bot.py || true
+        run: python your_bot.py
