@@ -290,6 +290,8 @@ def generate_dual_models():
                         return [random.choice(all_forms), random.choice(all_forms)]
                     
                     scores = {cat: float(base_score) for cat in all_forms}
+                    used_keno = False
+                    used_yl = False
                     
                     if mix_mode in ["keno_first", "balanced", "random_mix"] and keno_data and len(keno_data) > 0:
                         try:
@@ -307,6 +309,7 @@ def generate_dual_models():
                                     p_val = sum([nbrs[i] for i in idx_list]) % 10
                                     raw_map = ["小双", "小单", "小双", "小单", "小双", "大单", "大双", "大单", "大双", "大单"]
                                     scores[raw_map[p_val]] += k_w
+                                    used_keno = True
                         except:
                             pass
                     
@@ -314,13 +317,19 @@ def generate_dual_models():
                         for cat in all_forms:
                             try:
                                 scores[cat] += float(yl_data.get(cat, 0)) * y_w
+                                used_yl = True
                             except:
                                 pass
                     
-                    if len(history) >= 5:
+                    if len(history) >= 3:
                         recent = [h.get("combination", "") for h in history[:5]]
                         for cat in all_forms:
-                            scores[cat] += recent.count(cat) * random.uniform(5, 15)
+                            scores[cat] += recent.count(cat) * random.uniform(8, 18)
+                    
+                    if not used_keno and not used_yl:
+                        recent_combs = Counter([h.get("combination", "") for h in history[:min(10, len(history))]])
+                        for cat in all_forms:
+                            scores[cat] += recent_combs.get(cat, 0) * random.uniform(3, 8)
                     
                     sorted_res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
                     dual = [sorted_res[0][0], sorted_res[1][0]]
@@ -361,10 +370,11 @@ def generate_slay_models():
         def make_slay_model(strategy, lookback, threshold):
             def slay_model(history):
                 try:
-                    if not history or len(history) < max(lookback, 3):
+                    if not history or len(history) < 3:
                         return [random.choice(all_forms)], "数据不足"
                     
-                    recent = [i.get("combination", "") for i in history[:lookback]]
+                    lookback_actual = min(lookback, len(history))
+                    recent = [i.get("combination", "") for i in history[:lookback_actual]]
                     counts = Counter(recent)
                     curr = recent[0] if recent else random.choice(all_forms)
                     
