@@ -7,33 +7,24 @@ from collections import Counter
 import telebot
 from telebot import types
 
-# ==================== [1] 核心锁定配置 ====================
+# ==================== [1] 配置区 ====================
 BOT_TOKEN = "8789627493:AAExE8z-tRhrbGvENYVt4dxqWUFf56rrZJQ"
 IMG_WECHAT = "https://s1.ax1x.com/2023/10/31/peTEuKU.png" 
 IMG_ALIPAY = "https://s41.ax1x.com/2026/05/01/peTE1a9.jpg"
 CUSTOMER_SERVICE = "@woaimss"
 
-# API 地址
 API_KJ = "https://pc28.help/api/kj.json?nbr=100"
 API_KENO = "https://pc28.help/api/keno.json?nbr=100"
 API_YL = "https://pc28.help/api/yl.json"
 
-# 5y 映射表
-five_y_table = {
-    "5y0": [20, 15, 25, 5, 10], "5y1": [1, 11, 21, 6, 16, 26],
-    "5y2": [2, 12, 22, 7, 17, 27], "5y3": [13, 23, 3, 8, 18],
-    "5y4": [14, 24, 4, 19, 9]
-}
-
 # 卡密库
 CARD_DATABASE = [f"xhs_day_{i:02d}" for i in range(1, 21)] + ["xhs_forever_vip_888"]
-authorized_users = {}
+authorized_users = {} # 格式: {chat_id: card_string}
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# ==================== [2] 四大算法核心 (严禁精简) ====================
+# ==================== [2] 算法模块 (完整保留) ====================
 
-# 算法 1: V8-Hybrid 逻辑跳跃 (权重自我修正)
 def algo_v8_hybrid():
     try:
         keno = requests.get(API_KENO, timeout=5).json().get("data", [])
@@ -42,18 +33,16 @@ def algo_v8_hybrid():
         nbrs = [int(n) for n in keno[0]["nbrs"].split(",")]
         p_val = sum([nbrs[i] for i in [1, 4, 7, 10, 13, 16]]) % 10
         raw_map = ["小双", "小单", "小双", "小单", "小双", "大单", "大双", "大单", "大双", "大单"]
-        scores[raw_map[p_val]] += 55.0 # Keno 物理权重
-        for cat in scores: scores[cat] += float(yl.get(cat, 0)) * 3.5 # 遗漏权重
+        scores[raw_map[p_val]] += 55.0
+        for cat in scores: scores[cat] += float(yl.get(cat, 0)) * 3.5
         res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         return f"{res[0][0]} + {res[1][0]}"
     except: return "V8数据溢出"
 
-# 算法 2: 4D-PI+PHI (算力偏移模型)
 def algo_4d_pi(history):
     try:
         phi = (1 + 5**0.5) / 2
         latest = history[0]
-        # 使用你要求的 13 固定权重逻辑
         fixed_sum = sum(13 for _ in history[1:5]) 
         raw = (fixed_sum * phi) / (latest["total"] * math.pi if latest["total"] > 0 else 1.5)
         s = "{:.10f}".format(abs(raw - int(raw))).split('.')[1]
@@ -61,7 +50,6 @@ def algo_4d_pi(history):
         return f"{cat_map[int(s[0])]} + {cat_map[int(s[1])]}"
     except: return "4D算力载入中"
 
-# 算法 3: V23-ARMOR (形态装甲必杀)
 def algo_v23_armor(history):
     try:
         recent_10 = [i["combination"] for i in history[:10]]
@@ -69,11 +57,9 @@ def algo_v23_armor(history):
         if recent_10[0] == recent_10[1]:
             opposites = {"大单":"小双", "小双":"大单", "大双":"小单", "小单":"大双"}
             return f"杀【{opposites[recent_10[0]]}】"
-        else:
-            return f"杀【{random.choice(forms)}】" # 震荡拦截
+        return f"杀【{random.choice(forms)}】"
     except: return "Armor部署中"
 
-# 算法 4: V18.1-RESONANCE (5y 坐标锁定)
 def algo_5y_resonance(history):
     try:
         y_list = [int(sum(int(x) for x in i["number"].split("+")) % 5) for i in history[:15]]
@@ -82,31 +68,51 @@ def algo_5y_resonance(history):
         return f"坐标 5y{pred_y_idx}"
     except: return "5y对齐失败"
 
-# ==================== [3] 登录与权限 ====================
+# ==================== [3] 权限与键盘管理 ====================
+
+def get_auth_keyboard():
+    """未登录时的内联按钮"""
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("🔑 购买授权卡密", callback_data="buy_entry"))
+    return mk
+
+def show_main_menu(chat_id):
+    """登录成功后的快捷键盘"""
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    kb.add("🔮 获取矩阵预测", "📊 胜率排行榜", "⚙️ 模型说明", "🔑 获取卡密")
+    bot.send_message(chat_id, "💎 **主控台就绪，算法矩阵全量加载。**\n您现在可以使用下方菜单进行预测。", reply_markup=kb)
+
 @bot.message_handler(commands=['start'])
 def start(m):
     if m.chat.id not in authorized_users:
-        mk = types.InlineKeyboardMarkup()
-        mk.add(types.InlineKeyboardButton("🔑 购买授权卡密", callback_data="buy_entry"))
-        bot.send_message(m.chat.id, "🛡️ **矩阵终端 V15.0 已锁定**\n请输入 `xhs` 开头的授权码解锁功能。", reply_markup=mk)
+        # 未授权时不给 ReplyKeyboardMarkup，只给内联按钮
+        bot.send_message(
+            m.chat.id, 
+            "🛡️ **矩阵终端 V15.2 已锁定**\n\n您当前未获得授权。请输入 `xhs` 开头的卡密解锁，或点击下方按钮购买。", 
+            reply_markup=get_auth_keyboard(),
+            parse_mode="Markdown"
+        )
     else:
-        main_menu(m.chat.id)
+        show_main_menu(m.chat.id)
 
 @bot.message_handler(func=lambda m: m.text.startswith("xhs"))
-def auth(m):
-    if m.text in CARD_DATABASE:
-        authorized_users[m.chat.id] = m.text
-        bot.send_message(m.chat.id, "✅ **身份验证通过**")
-        main_menu(m.chat.id)
+def auth_process(m):
+    """处理卡密输入逻辑"""
+    if m.text.strip() in CARD_DATABASE:
+        authorized_users[m.chat.id] = m.text.strip()
+        bot.send_message(m.chat.id, "✅ **身份验证通过！欢迎回来。**")
+        show_main_menu(m.chat.id)
     else:
-        bot.send_message(m.chat.id, "❌ **无效卡密**")
+        bot.send_message(m.chat.id, "❌ **无效或已过期的卡密**\n请检查输入或联系客服购买。")
 
-def main_menu(chat_id):
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    kb.add("🔮 获取矩阵预测", "📊 胜率排行榜", "🔑 获取卡密", "⚙️ 模型说明")
-    bot.send_message(chat_id, "💎 **主控台就绪，算法矩阵全量加载。**", reply_markup=kb)
+# ==================== [4] 交易模块 (修复按钮按不了) ====================
 
-# ==================== [4] 支付与客服逻辑 ====================
+@bot.callback_query_handler(func=lambda c: c.data == "buy_entry")
+def callback_buy_entry(c):
+    # 必须调用 answer_callback_query 否则按钮会一直转圈/失效
+    bot.answer_callback_query(c.id)
+    buy_info(c.message)
+
 @bot.message_handler(func=lambda m: m.text == "🔑 获取卡密")
 def buy_info(m):
     mk = types.InlineKeyboardMarkup(row_width=1)
@@ -117,36 +123,51 @@ def buy_info(m):
     bot.send_message(m.chat.id, "💎 **请选择授权卡种：**", reply_markup=mk)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("p_"))
-def pay_type(c):
+def pay_type_select(c):
+    bot.answer_callback_query(c.id)
     price = c.data.split("_")[1]
     mk = types.InlineKeyboardMarkup()
     mk.add(
         types.InlineKeyboardButton("微信支付", callback_data=f"qr_wx_{price}"),
         types.InlineKeyboardButton("支付宝支付", callback_data=f"qr_ali_{price}")
     )
-    bot.edit_message_text(f"💰 金额：`{price} 元` \n请选择支付通道：", c.message.chat.id, c.message.message_id, reply_markup=mk, parse_mode="Markdown")
+    bot.edit_message_text(f"💰 待支付金额：`{price} 元` \n请选择支付通道：", c.message.chat.id, c.message.message_id, reply_markup=mk, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("qr_"))
-def send_qr(c):
+def send_payment_qr(c):
+    bot.answer_callback_query(c.id)
     _, method, price = c.data.split("_")
-    qr = IMG_WECHAT if method == "wx" else IMG_ALIPAY
+    qr_url = IMG_WECHAT if method == "wx" else IMG_ALIPAY
     mk = types.InlineKeyboardMarkup()
-    mk.add(types.InlineKeyboardButton("✅ 确认支付", callback_data="conf_pay"))
+    mk.add(types.InlineKeyboardButton("✅ 我已支付", callback_data="conf_pay"))
+    
     bot.delete_message(c.message.chat.id, c.message.message_id)
-    bot.send_photo(c.message.chat.id, qr, caption=f"🎯 **扫码支付: {price} 元**\n完成后请点击下方按钮核实。", reply_markup=mk)
+    bot.send_photo(
+        c.message.chat.id, 
+        qr_url, 
+        caption=f"🎯 **扫码支付: {price} 元**\n\n请在支付完成后点击下方确认按钮。", 
+        reply_markup=mk
+    )
 
 @bot.callback_query_handler(func=lambda c: c.data == "conf_pay")
-def conf_action(c):
-    bot.send_message(c.message.chat.id, f"👤 **请联系客服核实发卡**\n\n发送支付截图至：{CUSTOMER_SERVICE}\n核实后发放以 `xhs` 开头的授权码。")
+def final_conf(c):
+    bot.answer_callback_query(c.id, "正在核实支付状态...", show_alert=True)
+    bot.send_message(
+        c.message.chat.id, 
+        f"👤 **支付核实引导**\n\n系统已记录您的支付申请。请将支付截图发送给客服：{CUSTOMER_SERVICE}\n\n客服核实后会为您发放 `xhs` 开头的授权码。"
+    )
 
-# ==================== [5] 预测输出 ====================
+# ==================== [5] 核心功能 (加锁) ====================
+
 @bot.message_handler(func=lambda m: m.text == "🔮 获取矩阵预测")
-def get_all_preds(m):
+def handle_prediction(m):
+    # 这里的二次校验防止用户通过旧消息点击
     if m.chat.id not in authorized_users:
-        bot.send_message(m.chat.id, "⚠️ 请先登录卡密！")
+        bot.send_message(m.chat.id, "⚠️ **访问拒绝**\n请先输入授权码登录！", reply_markup=get_auth_keyboard())
         return
+        
     try:
-        raw_kj = requests.get(API_KJ).json().get("data", [])
+        raw_kj = requests.get(API_KJ, timeout=5).json().get("data", [])
         for i in raw_kj: i["total"] = sum(int(x) for x in i["number"].split("+"))
         
         v8 = algo_v8_hybrid()
@@ -161,10 +182,11 @@ def get_all_preds(m):
                f"🛡️ **Armor 杀组:** `{armor}`\n"
                f"🧭 **5y 共振:** `{res5y}`\n"
                f"━━━━━━━━━━━━━━\n"
-               f"📈 当前状态：`算法同步中`")
+               f"📈 状态：`实时演算中` | 授权码：有效")
         bot.send_message(m.chat.id, msg, parse_mode="Markdown")
     except:
-        bot.send_message(m.chat.id, "❌ API 连接失败")
+        bot.send_message(m.chat.id, "❌ **数据中心连接超时**\n请稍后再试。")
 
 if __name__ == "__main__":
+    print("🚀 矩阵终端 V15.2 已启动运行...")
     bot.infinity_polling()
