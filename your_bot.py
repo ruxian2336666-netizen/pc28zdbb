@@ -95,6 +95,9 @@ MAX_FREE_TRIAL = 3
 CHANNEL_ID = "@xianhe13145200"
 INVITE_BONUS = {}
 
+# ==================== 回测缓存 ====================
+backtest_cache = {}
+
 
 # ==================== 数据获取 ====================
 def get_global_clean_data():
@@ -213,7 +216,6 @@ def old_slayer_factory(history, cfg):
     forms = ["大单", "小单", "大双", "小双"]
     h_slice = [h.get("combination") for h in history[:cfg['depth']]]
     counts = Counter(h_slice)
-    
     if cfg['type'] == "FREQ":
         target = max(forms, key=lambda x: counts.get(x, 0)) if cfg['bias'] == "HOT" else min(forms, key=lambda x: counts.get(x, 0))
         reason = f"{cfg['depth']}期{cfg['bias']}态杀"
@@ -331,28 +333,11 @@ def new_kill_v3(history, mid):
     idx = mid % 5
     h = [x.get("combination", "小单") for x in history[-30:]] if history else forms
     counts = Counter(h)
-    
-    if idx == 0:
-        target = max(forms, key=lambda x: counts.get(x, 0))
-        reason = "频数热杀"
-    elif idx == 1:
-        target = min(forms, key=lambda x: counts.get(x, 0))
-        reason = "频数冷杀"
-    elif idx == 2:
-        last = h[0] if h else forms[0]
-        opp = {"大单": "小双", "小双": "大单", "大双": "小单", "小单": "大双"}
-        target = opp.get(last, forms[0])
-        reason = "转移对立杀"
-    elif idx == 3:
-        nbr = int(history[0].get('nbr', 0)) if history else 0
-        target = forms[nbr % 4]
-        reason = "周期算子杀"
-    else:
-        total = sum(counts.values()) + 1
-        entropy_scores = {f: (counts.get(f,0)+1)/total for f in forms}
-        target = min(entropy_scores, key=entropy_scores.get)
-        reason = "熵最小杀"
-    
+    if idx == 0: target = max(forms, key=lambda x: counts.get(x, 0)); reason = "频数热杀"
+    elif idx == 1: target = min(forms, key=lambda x: counts.get(x, 0)); reason = "频数冷杀"
+    elif idx == 2: last = h[0] if h else forms[0]; opp = {"大单":"小双","小双":"大单","大双":"小单","小单":"大双"}; target = opp.get(last, forms[0]); reason = "转移对立杀"
+    elif idx == 3: nbr = int(history[0].get('nbr', 0)) if history else 0; target = forms[nbr % 4]; reason = "周期算子杀"
+    else: total = sum(counts.values()) + 1; entropy_scores = {f: (counts.get(f,0)+1)/total for f in forms}; target = min(entropy_scores, key=entropy_scores.get); reason = "熵最小杀"
     return [target], f"[V3] {reason}"
 
 def new_dual_v3(history, mid):
@@ -361,23 +346,12 @@ def new_dual_v3(history, mid):
     h = [x.get("combination", "小单") for x in history[-30:]] if history else forms
     counts = Counter(h)
     scores = {f: 100.0 for f in forms}
-    
     for f in forms:
-        if idx == 0:
-            scores[f] += counts.get(f, 0) * 2
-        elif idx == 1:
-            scores[f] -= counts.get(f, 0) * 1.5
-        elif idx == 2:
-            last = h[0] if h else forms[0]
-            opp = {"大单": "小双", "小双": "大单", "大双": "小单", "小单": "大双"}
-            if f == opp.get(last, ""): scores[f] += 30
-        elif idx == 3:
-            nbr = int(history[0].get('nbr', 0)) if history else 0
-            scores[f] += (nbr % 5 + 1) * 5
-        else:
-            total = sum(counts.values()) + 1
-            scores[f] += (counts.get(f,0)+1)/total * 50
-    
+        if idx == 0: scores[f] += counts.get(f, 0) * 2
+        elif idx == 1: scores[f] -= counts.get(f, 0) * 1.5
+        elif idx == 2: last = h[0] if h else forms[0]; opp = {"大单":"小双","小双":"大单","大双":"小单","小单":"大双"}; scores[f] += 30 if f == opp.get(last, "") else 0
+        elif idx == 3: nbr = int(history[0].get('nbr', 0)) if history else 0; scores[f] += (nbr % 5 + 1) * 5
+        else: total = sum(counts.values()) + 1; scores[f] += (counts.get(f,0)+1)/total * 50
     return sorted(scores, key=scores.get, reverse=True)[:2]
 
 for i in range(1, 101):
@@ -416,49 +390,76 @@ def get_invite_link(chat_id):
     return f"https://t.me/{bot.get_me().username}?start=invite_{chat_id}"
 
 
-# ==================== 排行榜(50期回测，200期连中上限) ====================
+# ==================== 回测缓存系统 ====================
+def get_cached_backtest(model_id, history, keno, yl, test_len=50, streak_len=200):
+    """带缓存的回测：同一期号不重复计算"""
+    if not history: return None
+    current_issue = history[0]['nbr']
+    
+    # 检查缓存
+    if model_id in backtest_cache:
+        cached = backtest_cache[model_id]
+        if cached.get("issue") == current_issue:
+            return cached["data"]
+    
+    # 重新计算
+    info = ALL_MODELS[model_id]["info"]
+    mt = info["type"]
+    func = ALL_MODELS[model_id]["func"]
+    
+    bt_len = min(test_len, len(history) - 1)
+    win_count = 0
+    for i in range(1, bt_len + 1):
+        try:
+            h_slice = history[i:]
+            if mt == "双组": pred = func(h_slice, keno, yl)
+            else: pred = func(h_slice)
+            actual = history[i-1]["combination"]
+            if mt == "双组":
+                pred_list = pred[0] if isinstance(pred, tuple) else pred
+                if actual in pred_list: win_count += 1
+            else:
+                if actual != get_slay_target(pred): win_count += 1
+        except: continue
+    
+    sl = min(streak_len, len(history) - 1)
+    streak = ms = 0
+    for i in range(1, sl + 1):
+        try:
+            h_slice = history[i:]
+            if mt == "双组": pred = func(h_slice, keno, yl)
+            else: pred = func(h_slice)
+            actual = history[i-1]["combination"]
+            hit = False
+            if mt == "双组":
+                pred_list = pred[0] if isinstance(pred, tuple) else pred
+                if actual in pred_list: hit = True
+            else:
+                if actual != get_slay_target(pred): hit = True
+            if hit: streak += 1
+            else: streak = 0
+            ms = max(ms, streak)
+        except: continue
+    
+    result = {"win": win_count, "total": bt_len, "rate": (win_count/bt_len)*100, "streak": streak, "max_streak": ms}
+    
+    # 存入缓存
+    backtest_cache[model_id] = {"issue": current_issue, "data": result}
+    
+    return result
+
+
+# ==================== 排行榜(带缓存) ====================
 def get_backtest_rank_top10(filter_type=None):
     history, keno, yl = get_global_clean_data()
     if len(history) < 25: return []
-    BACKTEST_LEN = min(50, len(history) - 1)
-    STREAK_LEN = min(200, len(history) - 1)
     ranks = []
     for mid, md in ALL_MODELS.items():
         info = md["info"]
         if filter_type and info["type"] != filter_type: continue
-        func = md["func"]; mt = info["type"]
-        win = 0
-        for i in range(1, BACKTEST_LEN + 1):
-            try:
-                h_slice = history[i:]
-                if mt == "双组": pred = func(h_slice, keno, yl)
-                else: pred = func(h_slice)
-                actual = history[i-1]["combination"]
-                if mt == "双组":
-                    pred_list = pred[0] if isinstance(pred, tuple) else pred
-                    if actual in pred_list: win += 1
-                else:
-                    if actual != get_slay_target(pred): win += 1
-            except: continue
-        streak = ms = 0
-        for i in range(1, STREAK_LEN + 1):
-            try:
-                h_slice = history[i:]
-                if mt == "双组": pred = func(h_slice, keno, yl)
-                else: pred = func(h_slice)
-                actual = history[i-1]["combination"]
-                hit = False
-                if mt == "双组":
-                    pred_list = pred[0] if isinstance(pred, tuple) else pred
-                    if actual in pred_list: hit = True
-                else:
-                    if actual != get_slay_target(pred): hit = True
-                if hit: streak += 1
-                else: streak = 0
-                ms = max(ms, streak)
-            except: continue
-        rate = (win / BACKTEST_LEN) * 100
-        ranks.append({"id": mid, "name": info["name"], "type": mt, "win": win, "total": BACKTEST_LEN, "rate": rate, "streak": ms, "current_streak": streak, "params": info["params"]})
+        bt = get_cached_backtest(mid, history, keno, yl)
+        if bt is None: continue
+        ranks.append({"id": mid, "name": info["name"], "type": info["type"], "win": bt["win"], "total": bt["total"], "rate": bt["rate"], "streak": bt["max_streak"], "current_streak": bt["streak"], "params": info["params"]})
     return sorted(ranks, key=lambda x: x["win"], reverse=True)[:10]
 
 
@@ -508,7 +509,6 @@ MAX_MODEL_ID = 1404
 def welcome(m):
     args = m.text.split()
     chat_id = m.chat.id
-    
     if len(args) > 1 and args[1].startswith("invite_"):
         try:
             inviter_id = int(args[1].split("_")[1])
@@ -520,8 +520,7 @@ def welcome(m):
                     elif inviter_id not in authorized_users: FREE_TRIAL_COUNT[inviter_id] = MAX_FREE_TRIAL + 1
                     bot.send_message(inviter_id, f"🎉 你邀请了新用户！免费次数+1")
         except: pass
-    
-    text = f"欢迎来到『小鶴神』矩阵终端 V25.0\n━━━━━━━━━━━━━━\n{MAX_MODEL_ID}个演算模型\n杀组1-300/605-904/1205-1304 | 双组301-600/905-1204/1305-1404 | 原始601-604\n━━━━━━━━━━━━━━\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次"
+    text = f"欢迎来到『小鶴神』矩阵终端 V25.0\n━━━━━━━━━━━━━━\n{MAX_MODEL_ID}个演算模型\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次"
     if check_auth(chat_id): bot.send_message(chat_id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
     else:
         if chat_id not in FREE_TRIAL_COUNT: FREE_TRIAL_COUNT[chat_id] = MAX_FREE_TRIAL
@@ -561,28 +560,16 @@ def predict_by_model_id(m):
             else: bot.send_message(chat_id, msg)
             return
         deduct_trial(chat_id)
-    
     model_id = int(m.text)
     history, keno, yl = get_global_clean_data()
     if not history: bot.send_message(chat_id, "❌ 无法获取开奖数据"); return
     result, info = run_model_pred(model_id, history, keno, yl)
     if result is None: bot.send_message(chat_id, f"❌ 模型{model_id}演算失败"); return
-    test_len = min(50, len(history) - 1)
-    win_count = streak = max_streak = 0
-    for i in range(1, test_len + 1):
-        try:
-            h_slice = history[i:]
-            if info["type"] == "双组":
-                pred = ALL_MODELS[model_id]["func"](h_slice, keno, yl)
-                pred_list = pred[0] if isinstance(pred, tuple) else pred
-                if history[i-1]["combination"] in pred_list: win_count += 1; streak += 1
-                else: streak = 0
-            else:
-                pred = ALL_MODELS[model_id]["func"](h_slice)
-                if history[i-1]["combination"] != get_slay_target(pred): win_count += 1; streak += 1
-                else: streak = 0
-            max_streak = max(max_streak, streak)
-        except: continue
+    
+    # 使用缓存回测
+    bt = get_cached_backtest(model_id, history, keno, yl)
+    if bt is None: bot.send_message(chat_id, "❌ 回测失败"); return
+    
     try:
         next_issue = int(history[0]['nbr']) + 1
         if info["type"] == "双组":
@@ -593,7 +580,7 @@ def predict_by_model_id(m):
             reason = result[1] if isinstance(result, tuple) and len(result) > 1 else "智能杀组"
             pred_text = f"🚫 必杀: 【 {slay_target} 】\n📝 {reason}"
         trial_info = f"\n🎁 剩余免费: {FREE_TRIAL_COUNT.get(chat_id, 0)}次" if chat_id in FREE_TRIAL_COUNT and chat_id not in authorized_users else ""
-        msg = (f"🎯 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}{trial_info}")
+        msg = (f"🎯 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{bt['total']}期: {bt['rate']:.1f}%\n🔥 连中: {bt['streak']} | 最大: {bt['max_streak']}\n⚙️ {info['params']}{trial_info}")
         bot.send_message(chat_id, msg, reply_markup=predict_refresh_keyboard(model_id))
     except Exception as e: bot.send_message(chat_id, f"❌ 处理异常: {e}")
 
@@ -606,28 +593,18 @@ def cb_refresh(c):
             bot.answer_callback_query(c.id, "次数不足或未加频道", show_alert=True)
             return
         deduct_trial(chat_id)
-    
     model_id = int(c.data.split("_")[1])
     history, keno, yl = get_global_clean_data()
     if not history: bot.answer_callback_query(c.id, "数据不足", show_alert=True); return
     result, info = run_model_pred(model_id, history, keno, yl)
     if result is None: bot.answer_callback_query(c.id, "演算失败", show_alert=True); return
-    test_len = min(50, len(history) - 1)
-    win_count = streak = max_streak = 0
-    for i in range(1, test_len + 1):
-        try:
-            h_slice = history[i:]
-            if info["type"] == "双组":
-                pred = ALL_MODELS[model_id]["func"](h_slice, keno, yl)
-                pred_list = pred[0] if isinstance(pred, tuple) else pred
-                if history[i-1]["combination"] in pred_list: win_count += 1; streak += 1
-                else: streak = 0
-            else:
-                pred = ALL_MODELS[model_id]["func"](h_slice)
-                if history[i-1]["combination"] != get_slay_target(pred): win_count += 1; streak += 1
-                else: streak = 0
-            max_streak = max(max_streak, streak)
-        except: continue
+    
+    # 强制刷新回测（刷新按钮不缓存）
+    if model_id in backtest_cache:
+        del backtest_cache[model_id]
+    bt = get_cached_backtest(model_id, history, keno, yl)
+    if bt is None: bot.answer_callback_query(c.id, "回测失败", show_alert=True); return
+    
     try:
         next_issue = int(history[0]['nbr']) + 1
         if info["type"] == "双组":
@@ -638,7 +615,7 @@ def cb_refresh(c):
             reason = result[1] if isinstance(result, tuple) and len(result) > 1 else "智能杀组"
             pred_text = f"🚫 必杀: 【 {slay_target} 】\n📝 {reason}"
         trial_info = f"\n🎁 剩余免费: {FREE_TRIAL_COUNT.get(chat_id, 0)}次" if chat_id in FREE_TRIAL_COUNT and chat_id not in authorized_users else ""
-        msg = (f"🔄 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}{trial_info}")
+        msg = (f"🔄 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{bt['total']}期: {bt['rate']:.1f}%\n🔥 连中: {bt['streak']} | 最大: {bt['max_streak']}\n⚙️ {info['params']}{trial_info}")
         bot.edit_message_text(msg, chat_id, c.message.message_id, reply_markup=predict_refresh_keyboard(model_id))
         bot.answer_callback_query(c.id, "✅ 已刷新")
     except Exception as e: bot.answer_callback_query(c.id, f"错误: {e}", show_alert=True)
@@ -747,7 +724,7 @@ def cb_send_qr(c):
 def cb_conf(c): bot.answer_callback_query(c.id, "已提交", show_alert=True); bot.send_message(c.message.chat.id, f"✅ 已登记，联系客服领卡: {CUSTOMER_SERVICE}")
 
 if __name__ == "__main__":
-    print(f"🚀 小鶴神 V25.0 ({MAX_MODEL_ID}模型) 已启动")
+    print(f"🚀 小鶴神 V25.0 ({MAX_MODEL_ID}模型，带回测缓存) 已启动")
     while True:
         try: bot.infinity_polling(timeout=60, long_polling_timeout=30)
         except requests.exceptions.ReadTimeout: print("超时重连..."); time.sleep(3)
