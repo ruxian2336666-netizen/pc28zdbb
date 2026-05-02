@@ -89,6 +89,12 @@ FETCH_INTERVAL = random.randint(25, 35)
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# ==================== 试用系统 ====================
+FREE_TRIAL_COUNT = {}
+MAX_FREE_TRIAL = 3
+CHANNEL_ID = "@xhszdbs1"
+INVITE_BONUS = {}
+
 
 # ==================== 数据获取 ====================
 def get_global_clean_data():
@@ -275,14 +281,45 @@ ALL_MODELS[603] = {"func": lambda h, k=None, y=None: algo_v23_armor(h), "info": 
 ALL_MODELS[604] = {"func": lambda h, k=None, y=None: algo_5y_resonance(h), "info": {"id": 604, "name": "5y Resonance 双组(原)", "type": "双组", "params": "原始共振"}}
 
 
-# ==================== 辅助函数：提取杀组目标 ====================
+# ==================== 辅助函数 ====================
 def get_slay_target(pred):
-    """从杀组预测结果中提取目标字符串"""
     if isinstance(pred, tuple):
         pred = pred[0]
     if isinstance(pred, list) and len(pred) > 0:
         return pred[0]
     return str(pred)
+
+def is_user_in_channel(chat_id):
+    try:
+        member = bot.get_chat_member(CHANNEL_ID, chat_id)
+        return member.status in ["creator", "administrator", "member"]
+    except:
+        return False
+
+def check_channel_and_trial(chat_id):
+    if chat_id in authorized_users:
+        return True, ""
+    if chat_id not in FREE_TRIAL_COUNT:
+        FREE_TRIAL_COUNT[chat_id] = MAX_FREE_TRIAL
+    remaining = FREE_TRIAL_COUNT[chat_id]
+    if not is_user_in_channel(chat_id):
+        mk = types.InlineKeyboardMarkup(row_width=2)
+        mk.add(
+            types.InlineKeyboardButton("📢 加入频道", url=f"https://t.me/{CHANNEL_ID.replace('@', '')}"),
+            types.InlineKeyboardButton("✅ 已加入，验证", callback_data="verify_channel")
+        )
+        return False, (f"⚠️ 请先加入官方频道才能使用\n━━━━━━━━━━━━━━\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次\n📩 加入频道后点击验证", mk)
+    if remaining <= 0:
+        return False, ("⏰ 免费次数已用完\n━━━━━━━━━━━━━━\n💎 请购买卡密解锁无限使用\n🔑 点击下方按钮购买", auth_keyboard())
+    FREE_TRIAL_COUNT[chat_id] = remaining - 1
+    if remaining == MAX_FREE_TRIAL:
+        return True, f"🎁 首次免费试用！还剩 {remaining-1} 次"
+    else:
+        return True, f"🎁 免费试用中！还剩 {FREE_TRIAL_COUNT[chat_id]} 次"
+
+def get_invite_link(chat_id):
+    bot_username = bot.get_me().username
+    return f"https://t.me/{bot_username}?start=invite_{chat_id}"
 
 
 # ==================== 排行榜 ====================
@@ -363,28 +400,77 @@ MAX_MODEL_ID = 604
 
 @bot.message_handler(commands=['start'])
 def welcome(m):
-    text = f"欢迎来到『小鶴神』矩阵终端 V24.0\n━━━━━━━━━━━━━━\n集成{MAX_MODEL_ID}个演算模型\n杀组1-300 | 双组301-600 | 原始601-604\n━━━━━━━━━━━━━━\n输入编号即可预测"
-    if check_auth(m.chat.id): bot.send_message(m.chat.id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
-    else: bot.send_photo(m.chat.id, IMG_LOGO, caption=text, reply_markup=auth_keyboard())
+    args = m.text.split()
+    chat_id = m.chat.id
+    
+    # 邀请处理
+    if len(args) > 1 and args[1].startswith("invite_"):
+        try:
+            inviter_id = int(args[1].split("_")[1])
+            if inviter_id != chat_id:
+                if inviter_id not in INVITE_BONUS:
+                    INVITE_BONUS[inviter_id] = []
+                if chat_id not in INVITE_BONUS[inviter_id]:
+                    INVITE_BONUS[inviter_id].append(chat_id)
+                    if inviter_id in FREE_TRIAL_COUNT:
+                        FREE_TRIAL_COUNT[inviter_id] += 1
+                        bot.send_message(inviter_id, f"🎉 你邀请了新用户！免费次数+1（当前: {FREE_TRIAL_COUNT[inviter_id]}）")
+                    elif inviter_id not in authorized_users:
+                        FREE_TRIAL_COUNT[inviter_id] = MAX_FREE_TRIAL + 1
+                        bot.send_message(inviter_id, f"🎉 你邀请了新用户！获得 {FREE_TRIAL_COUNT[inviter_id]} 次免费试用")
+        except: pass
+    
+    text = f"欢迎来到『小鶴神』矩阵终端 V24.0\n━━━━━━━━━━━━━━\n集成{MAX_MODEL_ID}个演算模型\n杀组1-300 | 双组301-600 | 原始601-604\n━━━━━━━━━━━━━━\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次\n📢 加入频道 + 邀请好友送次数"
+    if check_auth(chat_id):
+        bot.send_message(chat_id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
+    else:
+        if chat_id not in FREE_TRIAL_COUNT:
+            FREE_TRIAL_COUNT[chat_id] = MAX_FREE_TRIAL
+        bot.send_photo(chat_id, IMG_LOGO, caption=text, reply_markup=auth_keyboard())
 
 @bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 杀组胜率排行", "📊 双组胜率排行", "📈 数据走势分析", "🔍 模型编号查询", "👤 个人主页"])
 def protected_features(m):
-    if not check_auth(m.chat.id): bot.send_message(m.chat.id, "⚠️ 请先登录", reply_markup=auth_keyboard()); return
-    if m.text == "🔮 输入编号预测": bot.send_message(m.chat.id, f"🎯 输入编号 (1-{MAX_MODEL_ID})")
+    chat_id = m.chat.id
+    if check_auth(chat_id):
+        handle_feature(m)
+        return
+    allowed, msg = check_channel_and_trial(chat_id)
+    if allowed:
+        if isinstance(msg, str) and msg:
+            bot.send_message(chat_id, msg)
+        handle_feature(m)
+    else:
+        if isinstance(msg, tuple):
+            text, markup = msg
+            bot.send_message(chat_id, text, reply_markup=markup)
+        else:
+            bot.send_message(chat_id, msg)
+
+def handle_feature(m):
+    chat_id = m.chat.id
+    if m.text == "🔮 输入编号预测": bot.send_message(chat_id, f"🎯 输入编号 (1-{MAX_MODEL_ID})")
     elif m.text == "📊 杀组胜率排行": show_rank(m, "杀组")
     elif m.text == "📊 双组胜率排行": show_rank(m, "双组")
     elif m.text == "📈 数据走势分析": data_analysis(m)
-    elif m.text == "🔍 模型编号查询": bot.send_message(m.chat.id, f"📋 输入编号 (1-{MAX_MODEL_ID})")
+    elif m.text == "🔍 模型编号查询": bot.send_message(chat_id, f"📋 输入编号 (1-{MAX_MODEL_ID})")
     elif m.text == "👤 个人主页": show_profile(m)
 
 @bot.message_handler(func=lambda m: m.text.isdigit() and 1 <= int(m.text) <= MAX_MODEL_ID)
 def predict_by_model_id(m):
-    if not check_auth(m.chat.id): bot.send_message(m.chat.id, "⚠️ 请先登录", reply_markup=auth_keyboard()); return
+    chat_id = m.chat.id
+    if not check_auth(chat_id):
+        allowed, msg = check_channel_and_trial(chat_id)
+        if not allowed:
+            if isinstance(msg, tuple):
+                bot.send_message(chat_id, msg[0], reply_markup=msg[1])
+            else:
+                bot.send_message(chat_id, msg)
+            return
     model_id = int(m.text)
     history, keno, yl = get_global_clean_data()
-    if not history: bot.send_message(m.chat.id, "❌ 无法获取开奖数据"); return
+    if not history: bot.send_message(chat_id, "❌ 无法获取开奖数据"); return
     result, info = run_model_pred(model_id, history, keno, yl)
-    if result is None: bot.send_message(m.chat.id, f"❌ 模型{model_id}演算失败"); return
+    if result is None: bot.send_message(chat_id, f"❌ 模型{model_id}演算失败"); return
     test_len = min(100, len(history) - 1)
     win_count = streak = max_streak = 0
     for i in range(1, test_len + 1):
@@ -411,14 +497,19 @@ def predict_by_model_id(m):
             slay_target = get_slay_target(result)
             reason = result[1] if isinstance(result, tuple) and len(result) > 1 else "智能杀组"
             pred_text = f"🚫 必杀: 【 {slay_target} 】\n📝 {reason}"
-        msg = (f"🎯 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}")
-        bot.send_message(m.chat.id, msg, reply_markup=predict_refresh_keyboard(model_id))
-    except Exception as e: bot.send_message(m.chat.id, f"❌ 处理异常: {e}")
+        trial_info = ""
+        if chat_id not in authorized_users and chat_id in FREE_TRIAL_COUNT:
+            trial_info = f"\n🎁 剩余免费: {FREE_TRIAL_COUNT[chat_id]}次"
+        msg = (f"🎯 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}{trial_info}")
+        bot.send_message(chat_id, msg, reply_markup=predict_refresh_keyboard(model_id))
+    except Exception as e: bot.send_message(chat_id, f"❌ 处理异常: {e}")
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("refresh_"))
 def cb_refresh(c):
     chat_id = c.message.chat.id
-    if not check_auth(chat_id): bot.answer_callback_query(c.id, "⚠️ 请先登录", show_alert=True); return
+    if not check_auth(chat_id):
+        allowed, msg = check_channel_and_trial(chat_id)
+        if not allowed: bot.answer_callback_query(c.id, "次数不足或未加频道", show_alert=True); return
     model_id = int(c.data.split("_")[1])
     history, keno, yl = get_global_clean_data()
     if not history: bot.answer_callback_query(c.id, "数据不足", show_alert=True); return
@@ -450,13 +541,33 @@ def cb_refresh(c):
             slay_target = get_slay_target(result)
             reason = result[1] if isinstance(result, tuple) and len(result) > 1 else "智能杀组"
             pred_text = f"🚫 必杀: 【 {slay_target} 】\n📝 {reason}"
-        msg = (f"🔄 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}")
+        trial_info = ""
+        if chat_id not in authorized_users and chat_id in FREE_TRIAL_COUNT:
+            trial_info = f"\n🎁 剩余免费: {FREE_TRIAL_COUNT[chat_id]}次"
+        msg = (f"🔄 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}{trial_info}")
         bot.edit_message_text(msg, chat_id, c.message.message_id, reply_markup=predict_refresh_keyboard(model_id))
         bot.answer_callback_query(c.id, "✅ 已刷新")
     except Exception as e: bot.answer_callback_query(c.id, f"错误: {e}", show_alert=True)
 
 @bot.callback_query_handler(func=lambda c: c.data == "change_model")
 def cb_change(c): bot.answer_callback_query(c.id); bot.send_message(c.message.chat.id, f"🎯 输入新编号 (1-{MAX_MODEL_ID})")
+
+@bot.callback_query_handler(func=lambda c: c.data == "verify_channel")
+def cb_verify_channel(c):
+    chat_id = c.message.chat.id
+    if is_user_in_channel(chat_id):
+        bot.answer_callback_query(c.id, "✅ 验证通过！", show_alert=True)
+        bot.delete_message(chat_id, c.message.message_id)
+        bot.send_message(chat_id, f"🎁 你还有 {FREE_TRIAL_COUNT.get(chat_id, MAX_FREE_TRIAL)} 次免费预测\n🔮 点击下方按钮开始", reply_markup=main_menu_keyboard())
+    else:
+        bot.answer_callback_query(c.id, "❌ 你还未加入频道", show_alert=True)
+
+@bot.callback_query_handler(func=lambda c: c.data == "copy_invite")
+def cb_copy_invite(c):
+    chat_id = c.message.chat.id
+    invite_link = get_invite_link(chat_id)
+    bot.answer_callback_query(c.id, "邀请链接已显示", show_alert=True)
+    bot.send_message(chat_id, f"📨 你的专属邀请链接:\n{invite_link}\n\n📢 邀请1人=免费次数+1")
 
 def show_rank(m, filter_type=None):
     ranks = get_backtest_rank_top10(filter_type)
@@ -496,10 +607,12 @@ def show_profile(m):
         card = authorized_users[chat_id]
         card_info = card[:12] + "..." if len(card) > 12 else card
         success, msg = check_card_keyt(card, str(chat_id))
-        if success: expire_info = msg
-        else: expire_info = "已过期"
+        expire_info = msg if success else "已过期"
     
+    trial_info = f"{FREE_TRIAL_COUNT.get(chat_id, 0)}次" if chat_id in FREE_TRIAL_COUNT else "已用完"
+    invite_count = len(INVITE_BONUS.get(chat_id, []))
     online_count = len(authorized_users)
+    invite_link = get_invite_link(chat_id)
     
     txt = (f"👤 个人主页\n"
            f"━━━━━━━━━━━━━━\n"
@@ -508,9 +621,15 @@ def show_profile(m):
            f"📎 用户名: {username}\n"
            f"🔑 卡密: {card_info}\n"
            f"⏰ 有效期: {expire_info}\n"
+           f"🎁 免费剩余: {trial_info}\n"
+           f"👥 已邀请: {invite_count} 人\n"
            f"━━━━━━━━━━━━━━\n"
-           f"🌍 全球在线: {online_count} 人")
-    bot.send_message(m.chat.id, txt)
+           f"🌍 全球在线: {online_count} 人\n\n"
+           f"📨 邀请链接:\n{invite_link}")
+    
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("📨 复制邀请链接", callback_data="copy_invite"))
+    bot.send_message(chat_id, txt, reply_markup=mk)
 
 @bot.message_handler(func=lambda m: m.text == "🔑 购买/续费卡密")
 def buy_panel(m): bot.send_message(m.chat.id, "💎 选择套餐", reply_markup=buy_keyboard())
