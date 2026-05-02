@@ -203,71 +203,86 @@ def algo_5y_resonance(history):
 # ==================== 604个模型 ====================
 ALL_MODELS = {}
 
-def slayer_factory(history, cfg):
+def master_slayer_factory(history, cfg):
     forms = ["大单", "小单", "大双", "小双"]
-    h_slice = history[:cfg['depth']]
-    counts = Counter([h['combination'] for h in h_slice])
+    h_slice = [h.get("combination") for h in history[:cfg['depth']]]
+    counts = Counter(h_slice)
     
     if cfg['type'] == "FREQ":
-        target = max(forms, key=lambda x: counts.get(x, 0)) if cfg['sub'] == "HOT" else min(forms, key=lambda x: counts.get(x, 0))
-        reason = f"{cfg['depth']}期频率排除"
+        target = max(forms, key=lambda x: counts.get(x, 0)) if cfg['bias'] == "HOT" else min(forms, key=lambda x: counts.get(x, 0))
+        reason = f"{cfg['depth']}期{cfg['bias']}态杀"
     elif cfg['type'] == "GAP":
-        last = history[0]['combination']
-        target = forms[(forms.index(last) + cfg['offset']) % 4]
-        reason = f"形态跳程偏移杀"
+        last_idx = forms.index(h_slice[0]) if h_slice else 0
+        target = forms[(last_idx + cfg['offset']) % 4]
+        reason = f"偏移位{cfg['offset']}排除"
     else:
-        idx = (int(history[0]['nbr']) * cfg['multiplier'] + cfg['shift']) % 4
-        target = forms[idx]
-        reason = f"周期性算子排除"
-    
+        math_seed = (int(history[0].get('nbr', 0)) * cfg['m'] + cfg['s']) % 4
+        target = forms[math_seed]
+        reason = f"周期性算子{cfg['m']}排除"
+        
     return [target], reason
 
 for i in range(1, 301):
     cfg = {
-        'depth': 10 + (i % 50),
+        'depth': 10 + (i % 90),
         'type': "FREQ" if i <= 100 else ("GAP" if i <= 200 else "MATH"),
-        'sub': "HOT" if i % 2 == 0 else "COLD",
-        'offset': i % 4,
-        'multiplier': (i * 7) % 13,
-        'shift': i % 5
+        'bias': "HOT" if i % 2 == 0 else "COLD",
+        'offset': (i * 7) % 4,
+        'm': (i * 13) % 17,
+        's': i % 5
     }
     ALL_MODELS[i] = {
-        "func": lambda h, c=cfg: slayer_factory(h, c),
-        "info": {"id": i, "name": f"杀组 M{i}", "type": "杀组", "params": f"P-{i}"}
+        "func": lambda h, c=cfg: master_slayer_factory(h, c),
+        "info": {"id": i, "name": f"杀组 M{i}", "type": "杀组", "params": f"D{cfg['depth']}"}
     }
 
-def dual_factory(history, cfg):
+def master_dual_factory(history, cfg):
     forms = ["大单", "小单", "大双", "小双"]
     scores = {f: 100.0 for f in forms}
-    h_slice = history[:cfg['lookback']]
     
+    long_term = [h['combination'] for h in history[:min(99, len(history))]]
     for f in forms:
-        count = [h['combination'] for h in h_slice].count(f)
-        scores[f] += count * cfg['weight_trend']
+        scores[f] += long_term.count(f) * cfg['w_long']
+        
+    short_term = [h['combination'] for h in history[:min(5, len(history))]]
+    for f in forms:
+        scores[f] += short_term.count(f) * cfg['w_short']
+        
+    for f in forms:
         dist = 0
         for h in history:
             if h['combination'] == f: break
             dist += 1
-        scores[f] += dist * cfg['weight_gap']
+        scores[f] += dist * cfg['w_dist']
 
     res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     return [res[0][0], res[1][0]]
 
 for i in range(301, 601):
     cfg = {
-        'lookback': 5 + (i % 40),
-        'weight_trend': (i % 10) - 5,
-        'weight_gap': (i % 5) * 0.5
+        'w_long': math.sin(i) * 5,
+        'w_short': math.cos(i) * 15,
+        'w_dist': (i % 12) * 0.7
     }
     ALL_MODELS[i] = {
-        "func": lambda h, k, y, c=cfg: dual_factory(h, c),
-        "info": {"id": i, "name": f"双组 D{i}", "type": "双组", "params": f"W-{i}"}
+        "func": lambda h, k, y, c=cfg: master_dual_factory(h, c),
+        "info": {"id": i, "name": f"双组 D{i}", "type": "双组", "params": f"W:{cfg['w_long']:.1f}"}
     }
 
 ALL_MODELS[601] = {"func": lambda h, k=None, y=None: algo_v8_hybrid(h, k, y), "info": {"id": 601, "name": "V8-Hybrid 双组(原)", "type": "双组", "params": "原始权重"}}
 ALL_MODELS[602] = {"func": lambda h, k=None, y=None: algo_4d_pi(h), "info": {"id": 602, "name": "4D-PI+PHI 双组(原)", "type": "双组", "params": "原始算力"}}
 ALL_MODELS[603] = {"func": lambda h, k=None, y=None: algo_v23_armor(h), "info": {"id": 603, "name": "Armor V23 杀组(原)", "type": "杀组", "params": "原始装甲"}}
 ALL_MODELS[604] = {"func": lambda h, k=None, y=None: algo_5y_resonance(h), "info": {"id": 604, "name": "5y Resonance 双组(原)", "type": "双组", "params": "原始共振"}}
+
+
+# ==================== 辅助函数：提取杀组目标 ====================
+def get_slay_target(pred):
+    """从杀组预测结果中提取目标字符串"""
+    if isinstance(pred, tuple):
+        pred = pred[0]
+    if isinstance(pred, list) and len(pred) > 0:
+        return pred[0]
+    return str(pred)
 
 
 # ==================== 排行榜 ====================
@@ -284,15 +299,16 @@ def get_backtest_rank_top10(filter_type=None):
         for i in range(1, MAX_BACKTEST + 1):
             try:
                 h_slice = history[i:]
-                if mt == "双组": p = func(h_slice, keno, yl)
-                else: p = func(h_slice)
-                if isinstance(p, tuple): p = p[0]
+                if mt == "双组": pred = func(h_slice, keno, yl)
+                else: pred = func(h_slice)
                 actual = history[i-1]["combination"]
                 if mt == "双组":
-                    if actual in p: win += 1; streak += 1
+                    pred_list = pred[0] if isinstance(pred, tuple) else pred
+                    if actual in pred_list: win += 1; streak += 1
                     else: streak = 0
                 else:
-                    if actual != p[0]: win += 1; streak += 1
+                    slay_target = get_slay_target(pred)
+                    if actual != slay_target: win += 1; streak += 1
                     else: streak = 0
                 ms = max(ms, streak)
             except: continue
@@ -374,15 +390,15 @@ def predict_by_model_id(m):
     for i in range(1, test_len + 1):
         try:
             h_slice = history[i:]
-            if info["type"] == "双组": p = ALL_MODELS[model_id]["func"](h_slice, keno, yl)
-            else: p = ALL_MODELS[model_id]["func"](h_slice)
-            if isinstance(p, tuple): p = p[0]
-            actual = history[i-1]["combination"]
             if info["type"] == "双组":
-                if actual in p: win_count += 1; streak += 1
+                pred = ALL_MODELS[model_id]["func"](h_slice, keno, yl)
+                pred_list = pred[0] if isinstance(pred, tuple) else pred
+                if history[i-1]["combination"] in pred_list: win_count += 1; streak += 1
                 else: streak = 0
             else:
-                if actual != p[0]: win_count += 1; streak += 1
+                pred = ALL_MODELS[model_id]["func"](h_slice)
+                slay_target = get_slay_target(pred)
+                if history[i-1]["combination"] != slay_target: win_count += 1; streak += 1
                 else: streak = 0
             max_streak = max(max_streak, streak)
         except: continue
@@ -392,9 +408,9 @@ def predict_by_model_id(m):
             res_list = result[0] if isinstance(result, tuple) else result
             pred_text = f"🔥 双组: 【 {res_list[0]} + {res_list[1]} 】"
         else:
-            if isinstance(result, tuple): slay_item, reason = result[0][0], result[1]
-            else: slay_item, reason = result[0], "智能杀组"
-            pred_text = f"🚫 必杀: 【 {slay_item} 】\n📝 {reason}"
+            slay_target = get_slay_target(result)
+            reason = result[1] if isinstance(result, tuple) and len(result) > 1 else "智能杀组"
+            pred_text = f"🚫 必杀: 【 {slay_target} 】\n📝 {reason}"
         msg = (f"🎯 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}")
         bot.send_message(m.chat.id, msg, reply_markup=predict_refresh_keyboard(model_id))
     except Exception as e: bot.send_message(m.chat.id, f"❌ 处理异常: {e}")
@@ -413,15 +429,15 @@ def cb_refresh(c):
     for i in range(1, test_len + 1):
         try:
             h_slice = history[i:]
-            if info["type"] == "双组": p = ALL_MODELS[model_id]["func"](h_slice, keno, yl)
-            else: p = ALL_MODELS[model_id]["func"](h_slice)
-            if isinstance(p, tuple): p = p[0]
-            actual = history[i-1]["combination"]
             if info["type"] == "双组":
-                if actual in p: win_count += 1; streak += 1
+                pred = ALL_MODELS[model_id]["func"](h_slice, keno, yl)
+                pred_list = pred[0] if isinstance(pred, tuple) else pred
+                if history[i-1]["combination"] in pred_list: win_count += 1; streak += 1
                 else: streak = 0
             else:
-                if actual != p[0]: win_count += 1; streak += 1
+                pred = ALL_MODELS[model_id]["func"](h_slice)
+                slay_target = get_slay_target(pred)
+                if history[i-1]["combination"] != slay_target: win_count += 1; streak += 1
                 else: streak = 0
             max_streak = max(max_streak, streak)
         except: continue
@@ -431,9 +447,9 @@ def cb_refresh(c):
             res_list = result[0] if isinstance(result, tuple) else result
             pred_text = f"🔥 双组: 【 {res_list[0]} + {res_list[1]} 】"
         else:
-            if isinstance(result, tuple): slay_item, reason = result[0][0], result[1]
-            else: slay_item, reason = result[0], "智能杀组"
-            pred_text = f"🚫 必杀: 【 {slay_item} 】\n📝 {reason}"
+            slay_target = get_slay_target(result)
+            reason = result[1] if isinstance(result, tuple) and len(result) > 1 else "智能杀组"
+            pred_text = f"🚫 必杀: 【 {slay_target} 】\n📝 {reason}"
         msg = (f"🔄 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}")
         bot.edit_message_text(msg, chat_id, c.message.message_id, reply_markup=predict_refresh_keyboard(model_id))
         bot.answer_callback_query(c.id, "✅ 已刷新")
@@ -480,10 +496,8 @@ def show_profile(m):
         card = authorized_users[chat_id]
         card_info = card[:12] + "..." if len(card) > 12 else card
         success, msg = check_card_keyt(card, str(chat_id))
-        if success:
-            expire_info = msg
-        else:
-            expire_info = "已过期"
+        if success: expire_info = msg
+        else: expire_info = "已过期"
     
     online_count = len(authorized_users)
     
