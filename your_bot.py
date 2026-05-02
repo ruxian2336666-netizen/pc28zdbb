@@ -92,7 +92,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 # ==================== 试用系统 ====================
 FREE_TRIAL_COUNT = {}
 MAX_FREE_TRIAL = 3
-CHANNEL_ID = "@xhszdbs1"
+CHANNEL_ID = "@xianhe13145200"  # 已修改
 INVITE_BONUS = {}
 
 
@@ -206,10 +206,10 @@ def algo_5y_resonance(history):
     except: return ["大单","小双"]
 
 
-# ==================== 604个模型 ====================
+# ==================== 旧604个模型 (1-604) ====================
 ALL_MODELS = {}
 
-def master_slayer_factory(history, cfg):
+def old_slayer_factory(history, cfg):
     forms = ["大单", "小单", "大双", "小双"]
     h_slice = [h.get("combination") for h in history[:cfg['depth']]]
     counts = Counter(h_slice)
@@ -225,55 +225,30 @@ def master_slayer_factory(history, cfg):
         math_seed = (int(history[0].get('nbr', 0)) * cfg['m'] + cfg['s']) % 4
         target = forms[math_seed]
         reason = f"周期性算子{cfg['m']}排除"
-        
     return [target], reason
 
 for i in range(1, 301):
-    cfg = {
-        'depth': 10 + (i % 90),
-        'type': "FREQ" if i <= 100 else ("GAP" if i <= 200 else "MATH"),
-        'bias': "HOT" if i % 2 == 0 else "COLD",
-        'offset': (i * 7) % 4,
-        'm': (i * 13) % 17,
-        's': i % 5
-    }
-    ALL_MODELS[i] = {
-        "func": lambda h, c=cfg: master_slayer_factory(h, c),
-        "info": {"id": i, "name": f"杀组 M{i}", "type": "杀组", "params": f"D{cfg['depth']}"}
-    }
+    cfg = {'depth': 10 + (i % 90), 'type': "FREQ" if i <= 100 else ("GAP" if i <= 200 else "MATH"), 'bias': "HOT" if i % 2 == 0 else "COLD", 'offset': (i * 7) % 4, 'm': (i * 13) % 17, 's': i % 5}
+    ALL_MODELS[i] = {"func": lambda h, c=cfg: old_slayer_factory(h, c), "info": {"id": i, "name": f"杀组 M{i}", "type": "杀组", "params": f"D{cfg['depth']}"}}
 
-def master_dual_factory(history, cfg):
+def old_dual_factory(history, cfg):
     forms = ["大单", "小单", "大双", "小双"]
     scores = {f: 100.0 for f in forms}
-    
     long_term = [h['combination'] for h in history[:min(99, len(history))]]
-    for f in forms:
-        scores[f] += long_term.count(f) * cfg['w_long']
-        
+    for f in forms: scores[f] += long_term.count(f) * cfg['w_long']
     short_term = [h['combination'] for h in history[:min(5, len(history))]]
-    for f in forms:
-        scores[f] += short_term.count(f) * cfg['w_short']
-        
+    for f in forms: scores[f] += short_term.count(f) * cfg['w_short']
     for f in forms:
         dist = 0
         for h in history:
             if h['combination'] == f: break
             dist += 1
         scores[f] += dist * cfg['w_dist']
-
-    res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    return [res[0][0], res[1][0]]
+    return [x[0] for x in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:2]]
 
 for i in range(301, 601):
-    cfg = {
-        'w_long': math.sin(i) * 5,
-        'w_short': math.cos(i) * 15,
-        'w_dist': (i % 12) * 0.7
-    }
-    ALL_MODELS[i] = {
-        "func": lambda h, k, y, c=cfg: master_dual_factory(h, c),
-        "info": {"id": i, "name": f"双组 D{i}", "type": "双组", "params": f"W:{cfg['w_long']:.1f}"}
-    }
+    cfg = {'w_long': math.sin(i) * 5, 'w_short': math.cos(i) * 15, 'w_dist': (i % 12) * 0.7}
+    ALL_MODELS[i] = {"func": lambda h, k, y, c=cfg: old_dual_factory(h, c), "info": {"id": i, "name": f"双组 D{i}", "type": "双组", "params": f"W:{cfg['w_long']:.1f}"}}
 
 ALL_MODELS[601] = {"func": lambda h, k=None, y=None: algo_v8_hybrid(h, k, y), "info": {"id": 601, "name": "V8-Hybrid 双组(原)", "type": "双组", "params": "原始权重"}}
 ALL_MODELS[602] = {"func": lambda h, k=None, y=None: algo_4d_pi(h), "info": {"id": 602, "name": "4D-PI+PHI 双组(原)", "type": "双组", "params": "原始算力"}}
@@ -281,59 +256,116 @@ ALL_MODELS[603] = {"func": lambda h, k=None, y=None: algo_v23_armor(h), "info": 
 ALL_MODELS[604] = {"func": lambda h, k=None, y=None: algo_5y_resonance(h), "info": {"id": 604, "name": "5y Resonance 双组(原)", "type": "双组", "params": "原始共振"}}
 
 
+# ==================== 新增600个模型 (605-1204) ====================
+NEW_FORMS = ["大单", "小单", "大双", "小双"]
+
+def slice_data_hist(hist_data, mode, depth):
+    h = [x.get("combination", "小单") for x in hist_data[-depth:]] if hist_data else []
+    if not h: return [random.choice(NEW_FORMS)]
+    if mode == 0: return h
+    elif mode == 1: return h[::-1]
+    elif mode == 2: return h[::2] if len(h)>=2 else h
+    elif mode == 3: return h[1::2] if len(h)>=2 else h
+    else: return h[len(h)//2:]
+
+def calc_feature(hist, ftype):
+    res = {f: 0 for f in NEW_FORMS}
+    if not hist: return res
+    if ftype == 0:
+        for x in hist: res[x] = res.get(x, 0) + 1
+    elif ftype == 1:
+        last = {f: -1 for f in NEW_FORMS}
+        for i, x in enumerate(hist): last[x] = i
+        for f in NEW_FORMS: res[f] = len(hist) - last[f]
+    elif ftype == 2:
+        for i in range(1, len(hist)):
+            if hist[i] == hist[i-1]: res[hist[i]] = res.get(hist[i], 0) + 1
+    elif ftype == 3:
+        for i in range(1, len(hist)):
+            if hist[i] != hist[i-1]: res[hist[i]] = res.get(hist[i], 0) + 1
+    return res
+
+def new_kill_model(hist_data, cfg, mid):
+    data = slice_data_hist(hist_data, cfg["slice"], cfg["depth"])
+    feat = calc_feature(data, cfg["feature"])
+    scores = {}
+    for i, f in enumerate(NEW_FORMS):
+        base = feat[f]
+        noise = math.sin(mid * 0.31 + i) + math.cos(mid * 0.17 * (i+1)) + ((mid % 7) - 3) * 0.1
+        if cfg["mode"] == 0: score = base + noise
+        elif cfg["mode"] == 1: score = -base + noise
+        else: score = math.log(base + 1) + noise
+        scores[f] = score
+    target = min(scores, key=scores.get)
+    return [target], f"新杀组M{mid}"
+
+for i in range(1, 301):
+    mid = i + 604
+    cfg = {"depth": 10 + (i % 90), "slice": i % 5, "feature": i % 4, "mode": i % 3}
+    ALL_MODELS[mid] = {"func": lambda h, c=cfg, m=mid: new_kill_model(h, c, m), "info": {"id": mid, "name": f"新杀组 M{i}", "type": "杀组", "params": f"N-D{cfg['depth']}"}}
+
+def new_score_model(hist_data, cfg, mid):
+    data = slice_data_hist(hist_data, cfg["slice"], cfg["depth"])
+    freq = calc_feature(data, 0)
+    miss = calc_feature(data, 1)
+    trans = calc_feature(data, 2)
+    scores = {}
+    for i, f in enumerate(NEW_FORMS):
+        f1, f2, f3 = freq[f], miss[f], trans[f]
+        w1 = math.sin(mid * 0.13 + i)
+        w2 = math.cos(mid * 0.21 + i)
+        w3 = math.sin(mid * 0.37 + i*2)
+        score = w1 * f1 + w2 * f2 + w3 * f3 + math.sin(score + mid * 0.11) * 0.5 if 'score' in dir() else w1*f1 + w2*f2 + w3*f3
+        scores[f] = score
+    return sorted(scores, key=scores.get, reverse=True)[:2]
+
+for i in range(301, 601):
+    mid = i + 604
+    cfg = {"depth": 10 + (i % 90), "slice": i % 5}
+    ALL_MODELS[mid] = {"func": lambda h, k, y, c=cfg, m=mid: new_score_model(h, c, m), "info": {"id": mid, "name": f"新双组 D{i-300}", "type": "双组", "params": f"N-S{cfg['slice']}"}}
+
+
 # ==================== 辅助函数 ====================
 def get_slay_target(pred):
-    if isinstance(pred, tuple):
-        pred = pred[0]
-    if isinstance(pred, list) and len(pred) > 0:
-        return pred[0]
+    if isinstance(pred, tuple): pred = pred[0]
+    if isinstance(pred, list) and len(pred) > 0: return pred[0]
     return str(pred)
 
 def is_user_in_channel(chat_id):
     try:
         member = bot.get_chat_member(CHANNEL_ID, chat_id)
         return member.status in ["creator", "administrator", "member"]
-    except:
-        return False
+    except: return False
 
 def check_channel_and_trial(chat_id):
-    if chat_id in authorized_users:
-        return True, ""
-    if chat_id not in FREE_TRIAL_COUNT:
-        FREE_TRIAL_COUNT[chat_id] = MAX_FREE_TRIAL
+    if chat_id in authorized_users: return True, ""
+    if chat_id not in FREE_TRIAL_COUNT: FREE_TRIAL_COUNT[chat_id] = MAX_FREE_TRIAL
     remaining = FREE_TRIAL_COUNT[chat_id]
     if not is_user_in_channel(chat_id):
         mk = types.InlineKeyboardMarkup(row_width=2)
-        mk.add(
-            types.InlineKeyboardButton("📢 加入频道", url=f"https://t.me/{CHANNEL_ID.replace('@', '')}"),
-            types.InlineKeyboardButton("✅ 已加入，验证", callback_data="verify_channel")
-        )
-        return False, (f"⚠️ 请先加入官方频道才能使用\n━━━━━━━━━━━━━━\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次\n📩 加入频道后点击验证", mk)
-    if remaining <= 0:
-        return False, ("⏰ 免费次数已用完\n━━━━━━━━━━━━━━\n💎 请购买卡密解锁无限使用\n🔑 点击下方按钮购买", auth_keyboard())
-    FREE_TRIAL_COUNT[chat_id] = remaining - 1
-    if remaining == MAX_FREE_TRIAL:
-        return True, f"🎁 首次免费试用！还剩 {remaining-1} 次"
-    else:
-        return True, f"🎁 免费试用中！还剩 {FREE_TRIAL_COUNT[chat_id]} 次"
+        mk.add(types.InlineKeyboardButton("📢 加入频道", url=f"https://t.me/{CHANNEL_ID.replace('@', '')}"), types.InlineKeyboardButton("✅ 已加入，验证", callback_data="verify_channel"))
+        return False, (f"⚠️ 请先加入官方频道\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次", mk)
+    if remaining <= 0: return False, ("⏰ 免费次数已用完\n💎 请购买卡密解锁", auth_keyboard())
+    return True, ""
 
 def get_invite_link(chat_id):
-    bot_username = bot.get_me().username
-    return f"https://t.me/{bot_username}?start=invite_{chat_id}"
+    return f"https://t.me/{bot.get_me().username}?start=invite_{chat_id}"
 
 
-# ==================== 排行榜 ====================
+# ==================== 排行榜(50期回测，200期连中上限) ====================
 def get_backtest_rank_top10(filter_type=None):
     history, keno, yl = get_global_clean_data()
     if len(history) < 25: return []
-    MAX_BACKTEST = min(200, len(history) - 1)
+    BACKTEST_LEN = min(50, len(history) - 1)  # 50期回测
+    STREAK_LEN = min(200, len(history) - 1)   # 200期连中上限
     ranks = []
     for mid, md in ALL_MODELS.items():
         info = md["info"]
         if filter_type and info["type"] != filter_type: continue
         func = md["func"]; mt = info["type"]
-        win = streak = ms = 0
-        for i in range(1, MAX_BACKTEST + 1):
+        win = 0
+        # 50期胜率
+        for i in range(1, BACKTEST_LEN + 1):
             try:
                 h_slice = history[i:]
                 if mt == "双组": pred = func(h_slice, keno, yl)
@@ -341,16 +373,30 @@ def get_backtest_rank_top10(filter_type=None):
                 actual = history[i-1]["combination"]
                 if mt == "双组":
                     pred_list = pred[0] if isinstance(pred, tuple) else pred
-                    if actual in pred_list: win += 1; streak += 1
-                    else: streak = 0
+                    if actual in pred_list: win += 1
                 else:
-                    slay_target = get_slay_target(pred)
-                    if actual != slay_target: win += 1; streak += 1
-                    else: streak = 0
+                    if actual != get_slay_target(pred): win += 1
+            except: continue
+        # 200期连中
+        streak = ms = 0
+        for i in range(1, STREAK_LEN + 1):
+            try:
+                h_slice = history[i:]
+                if mt == "双组": pred = func(h_slice, keno, yl)
+                else: pred = func(h_slice)
+                actual = history[i-1]["combination"]
+                hit = False
+                if mt == "双组":
+                    pred_list = pred[0] if isinstance(pred, tuple) else pred
+                    if actual in pred_list: hit = True
+                else:
+                    if actual != get_slay_target(pred): hit = True
+                if hit: streak += 1
+                else: streak = 0
                 ms = max(ms, streak)
             except: continue
-        rate = (win / MAX_BACKTEST) * 100
-        ranks.append({"id": mid, "name": info["name"], "type": mt, "win": win, "total": MAX_BACKTEST, "rate": rate, "streak": ms, "current_streak": streak, "params": info["params"]})
+        rate = (win / BACKTEST_LEN) * 100
+        ranks.append({"id": mid, "name": info["name"], "type": mt, "win": win, "total": BACKTEST_LEN, "rate": rate, "streak": ms, "current_streak": streak, "params": info["params"]})
     return sorted(ranks, key=lambda x: x["win"], reverse=True)[:10]
 
 
@@ -390,61 +436,45 @@ def run_model_pred(model_id, history, keno, yl):
         if info["type"] == "双组": result = func(history, keno, yl)
         else: result = func(history)
         return result, info
-    except Exception as e:
-        print(f"模型{model_id}错误: {e}")
-        return None, info
+    except: return None, info
 
 
 # ==================== 指令 ====================
-MAX_MODEL_ID = 604
+MAX_MODEL_ID = 1204
 
 @bot.message_handler(commands=['start'])
 def welcome(m):
     args = m.text.split()
     chat_id = m.chat.id
     
-    # 邀请处理
     if len(args) > 1 and args[1].startswith("invite_"):
         try:
             inviter_id = int(args[1].split("_")[1])
             if inviter_id != chat_id:
-                if inviter_id not in INVITE_BONUS:
-                    INVITE_BONUS[inviter_id] = []
+                if inviter_id not in INVITE_BONUS: INVITE_BONUS[inviter_id] = []
                 if chat_id not in INVITE_BONUS[inviter_id]:
                     INVITE_BONUS[inviter_id].append(chat_id)
-                    if inviter_id in FREE_TRIAL_COUNT:
-                        FREE_TRIAL_COUNT[inviter_id] += 1
-                        bot.send_message(inviter_id, f"🎉 你邀请了新用户！免费次数+1（当前: {FREE_TRIAL_COUNT[inviter_id]}）")
-                    elif inviter_id not in authorized_users:
-                        FREE_TRIAL_COUNT[inviter_id] = MAX_FREE_TRIAL + 1
-                        bot.send_message(inviter_id, f"🎉 你邀请了新用户！获得 {FREE_TRIAL_COUNT[inviter_id]} 次免费试用")
+                    if inviter_id in FREE_TRIAL_COUNT: FREE_TRIAL_COUNT[inviter_id] += 1
+                    elif inviter_id not in authorized_users: FREE_TRIAL_COUNT[inviter_id] = MAX_FREE_TRIAL + 1
+                    bot.send_message(inviter_id, f"🎉 你邀请了新用户！免费次数+1")
         except: pass
     
-    text = f"欢迎来到『小鶴神』矩阵终端 V24.0\n━━━━━━━━━━━━━━\n集成{MAX_MODEL_ID}个演算模型\n杀组1-300 | 双组301-600 | 原始601-604\n━━━━━━━━━━━━━━\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次\n📢 加入频道 + 邀请好友送次数"
-    if check_auth(chat_id):
-        bot.send_message(chat_id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
+    text = f"欢迎来到『小鶴神』矩阵终端 V25.0\n━━━━━━━━━━━━━━\n{MAX_MODEL_ID}个演算模型\n杀组1-300/605-904 | 双组301-600/905-1204 | 原始601-604\n━━━━━━━━━━━━━━\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次"
+    if check_auth(chat_id): bot.send_message(chat_id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
     else:
-        if chat_id not in FREE_TRIAL_COUNT:
-            FREE_TRIAL_COUNT[chat_id] = MAX_FREE_TRIAL
+        if chat_id not in FREE_TRIAL_COUNT: FREE_TRIAL_COUNT[chat_id] = MAX_FREE_TRIAL
         bot.send_photo(chat_id, IMG_LOGO, caption=text, reply_markup=auth_keyboard())
 
 @bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 杀组胜率排行", "📊 双组胜率排行", "📈 数据走势分析", "🔍 模型编号查询", "👤 个人主页"])
 def protected_features(m):
     chat_id = m.chat.id
-    if check_auth(chat_id):
-        handle_feature(m)
-        return
-    allowed, msg = check_channel_and_trial(chat_id)
-    if allowed:
-        if isinstance(msg, str) and msg:
-            bot.send_message(chat_id, msg)
-        handle_feature(m)
-    else:
-        if isinstance(msg, tuple):
-            text, markup = msg
-            bot.send_message(chat_id, text, reply_markup=markup)
-        else:
-            bot.send_message(chat_id, msg)
+    if not check_auth(chat_id):
+        allowed, msg = check_channel_and_trial(chat_id)
+        if not allowed:
+            if isinstance(msg, tuple): bot.send_message(chat_id, msg[0], reply_markup=msg[1])
+            else: bot.send_message(chat_id, msg)
+            return
+    handle_feature(m)
 
 def handle_feature(m):
     chat_id = m.chat.id
@@ -455,23 +485,27 @@ def handle_feature(m):
     elif m.text == "🔍 模型编号查询": bot.send_message(chat_id, f"📋 输入编号 (1-{MAX_MODEL_ID})")
     elif m.text == "👤 个人主页": show_profile(m)
 
+def deduct_trial(chat_id):
+    if chat_id not in authorized_users and chat_id in FREE_TRIAL_COUNT:
+        FREE_TRIAL_COUNT[chat_id] -= 1
+
 @bot.message_handler(func=lambda m: m.text.isdigit() and 1 <= int(m.text) <= MAX_MODEL_ID)
 def predict_by_model_id(m):
     chat_id = m.chat.id
     if not check_auth(chat_id):
         allowed, msg = check_channel_and_trial(chat_id)
         if not allowed:
-            if isinstance(msg, tuple):
-                bot.send_message(chat_id, msg[0], reply_markup=msg[1])
-            else:
-                bot.send_message(chat_id, msg)
+            if isinstance(msg, tuple): bot.send_message(chat_id, msg[0], reply_markup=msg[1])
+            else: bot.send_message(chat_id, msg)
             return
+        deduct_trial(chat_id)
+    
     model_id = int(m.text)
     history, keno, yl = get_global_clean_data()
     if not history: bot.send_message(chat_id, "❌ 无法获取开奖数据"); return
     result, info = run_model_pred(model_id, history, keno, yl)
     if result is None: bot.send_message(chat_id, f"❌ 模型{model_id}演算失败"); return
-    test_len = min(100, len(history) - 1)
+    test_len = min(50, len(history) - 1)
     win_count = streak = max_streak = 0
     for i in range(1, test_len + 1):
         try:
@@ -483,8 +517,7 @@ def predict_by_model_id(m):
                 else: streak = 0
             else:
                 pred = ALL_MODELS[model_id]["func"](h_slice)
-                slay_target = get_slay_target(pred)
-                if history[i-1]["combination"] != slay_target: win_count += 1; streak += 1
+                if history[i-1]["combination"] != get_slay_target(pred): win_count += 1; streak += 1
                 else: streak = 0
             max_streak = max(max_streak, streak)
         except: continue
@@ -497,9 +530,7 @@ def predict_by_model_id(m):
             slay_target = get_slay_target(result)
             reason = result[1] if isinstance(result, tuple) and len(result) > 1 else "智能杀组"
             pred_text = f"🚫 必杀: 【 {slay_target} 】\n📝 {reason}"
-        trial_info = ""
-        if chat_id not in authorized_users and chat_id in FREE_TRIAL_COUNT:
-            trial_info = f"\n🎁 剩余免费: {FREE_TRIAL_COUNT[chat_id]}次"
+        trial_info = f"\n🎁 剩余免费: {FREE_TRIAL_COUNT.get(chat_id, 0)}次" if chat_id in FREE_TRIAL_COUNT and chat_id not in authorized_users else ""
         msg = (f"🎯 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}{trial_info}")
         bot.send_message(chat_id, msg, reply_markup=predict_refresh_keyboard(model_id))
     except Exception as e: bot.send_message(chat_id, f"❌ 处理异常: {e}")
@@ -509,13 +540,17 @@ def cb_refresh(c):
     chat_id = c.message.chat.id
     if not check_auth(chat_id):
         allowed, msg = check_channel_and_trial(chat_id)
-        if not allowed: bot.answer_callback_query(c.id, "次数不足或未加频道", show_alert=True); return
+        if not allowed:
+            bot.answer_callback_query(c.id, "次数不足或未加频道", show_alert=True)
+            return
+        deduct_trial(chat_id)
+    
     model_id = int(c.data.split("_")[1])
     history, keno, yl = get_global_clean_data()
     if not history: bot.answer_callback_query(c.id, "数据不足", show_alert=True); return
     result, info = run_model_pred(model_id, history, keno, yl)
     if result is None: bot.answer_callback_query(c.id, "演算失败", show_alert=True); return
-    test_len = min(100, len(history) - 1)
+    test_len = min(50, len(history) - 1)
     win_count = streak = max_streak = 0
     for i in range(1, test_len + 1):
         try:
@@ -527,8 +562,7 @@ def cb_refresh(c):
                 else: streak = 0
             else:
                 pred = ALL_MODELS[model_id]["func"](h_slice)
-                slay_target = get_slay_target(pred)
-                if history[i-1]["combination"] != slay_target: win_count += 1; streak += 1
+                if history[i-1]["combination"] != get_slay_target(pred): win_count += 1; streak += 1
                 else: streak = 0
             max_streak = max(max_streak, streak)
         except: continue
@@ -541,9 +575,7 @@ def cb_refresh(c):
             slay_target = get_slay_target(result)
             reason = result[1] if isinstance(result, tuple) and len(result) > 1 else "智能杀组"
             pred_text = f"🚫 必杀: 【 {slay_target} 】\n📝 {reason}"
-        trial_info = ""
-        if chat_id not in authorized_users and chat_id in FREE_TRIAL_COUNT:
-            trial_info = f"\n🎁 剩余免费: {FREE_TRIAL_COUNT[chat_id]}次"
+        trial_info = f"\n🎁 剩余免费: {FREE_TRIAL_COUNT.get(chat_id, 0)}次" if chat_id in FREE_TRIAL_COUNT and chat_id not in authorized_users else ""
         msg = (f"🔄 {info['name']} ({model_id})\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n{pred_text}\n━━━━━━━━━━━━━━\n📈 近{test_len}期: {win_count/test_len*100:.1f}%\n🔥 连中: {streak} | 最大: {max_streak}\n⚙️ {info['params']}{trial_info}")
         bot.edit_message_text(msg, chat_id, c.message.message_id, reply_markup=predict_refresh_keyboard(model_id))
         bot.answer_callback_query(c.id, "✅ 已刷新")
@@ -559,24 +591,22 @@ def cb_verify_channel(c):
         bot.answer_callback_query(c.id, "✅ 验证通过！", show_alert=True)
         bot.delete_message(chat_id, c.message.message_id)
         bot.send_message(chat_id, f"🎁 你还有 {FREE_TRIAL_COUNT.get(chat_id, MAX_FREE_TRIAL)} 次免费预测\n🔮 点击下方按钮开始", reply_markup=main_menu_keyboard())
-    else:
-        bot.answer_callback_query(c.id, "❌ 你还未加入频道", show_alert=True)
+    else: bot.answer_callback_query(c.id, "❌ 你还未加入频道", show_alert=True)
 
 @bot.callback_query_handler(func=lambda c: c.data == "copy_invite")
 def cb_copy_invite(c):
     chat_id = c.message.chat.id
-    invite_link = get_invite_link(chat_id)
     bot.answer_callback_query(c.id, "邀请链接已显示", show_alert=True)
-    bot.send_message(chat_id, f"📨 你的专属邀请链接:\n{invite_link}\n\n📢 邀请1人=免费次数+1")
+    bot.send_message(chat_id, f"📨 你的专属邀请链接:\n{get_invite_link(chat_id)}\n\n📢 邀请1人=免费次数+1")
 
 def show_rank(m, filter_type=None):
     ranks = get_backtest_rank_top10(filter_type)
     if not ranks: bot.send_message(m.chat.id, "❌ 数据不足"); return
     type_name = filter_type if filter_type else "全部"
-    txt = f"🏆 TOP10 {type_name} (近{ranks[0]['total']}期)\n━━━━━━━━━━━━━━\n"
+    txt = f"🏆 TOP10 {type_name} (近50期)\n━━━━━━━━━━━━━━\n"
     for i, r in enumerate(ranks):
         medal = ["🥇","🥈","🥉"][i] if i < 3 else f"{i+1}."
-        txt += f"{medal} #{r['id']} {r['name']}：{r['rate']:.1f}%\n   🔥 最大: {r['streak']} | 当前: {r['current_streak']}\n"
+        txt += f"{medal} #{r['id']} {r['name']}：{r['rate']:.1f}%\n   🔥 最大连中(200期): {r['streak']} | 当前: {r['current_streak']}\n"
     bot.send_message(m.chat.id, txt)
 
 def data_analysis(m):
@@ -600,7 +630,6 @@ def show_profile(m):
     user = m.from_user
     first_name = user.first_name if user.first_name else "未知"
     username = f"@{user.username}" if user.username else "未设置"
-    
     card_info = "未登录"
     expire_info = "无"
     if chat_id in authorized_users:
@@ -608,25 +637,11 @@ def show_profile(m):
         card_info = card[:12] + "..." if len(card) > 12 else card
         success, msg = check_card_keyt(card, str(chat_id))
         expire_info = msg if success else "已过期"
-    
     trial_info = f"{FREE_TRIAL_COUNT.get(chat_id, 0)}次" if chat_id in FREE_TRIAL_COUNT else "已用完"
     invite_count = len(INVITE_BONUS.get(chat_id, []))
     online_count = len(authorized_users)
     invite_link = get_invite_link(chat_id)
-    
-    txt = (f"👤 个人主页\n"
-           f"━━━━━━━━━━━━━━\n"
-           f"📛 昵称: {first_name}\n"
-           f"🆔 用户ID: {chat_id}\n"
-           f"📎 用户名: {username}\n"
-           f"🔑 卡密: {card_info}\n"
-           f"⏰ 有效期: {expire_info}\n"
-           f"🎁 免费剩余: {trial_info}\n"
-           f"👥 已邀请: {invite_count} 人\n"
-           f"━━━━━━━━━━━━━━\n"
-           f"🌍 全球在线: {online_count} 人\n\n"
-           f"📨 邀请链接:\n{invite_link}")
-    
+    txt = (f"👤 个人主页\n━━━━━━━━━━━━━━\n📛 昵称: {first_name}\n🆔 用户ID: {chat_id}\n📎 用户名: {username}\n🔑 卡密: {card_info}\n⏰ 有效期: {expire_info}\n🎁 免费剩余: {trial_info}\n👥 已邀请: {invite_count} 人\n━━━━━━━━━━━━━━\n🌍 全球在线: {online_count} 人\n\n📨 邀请链接:\n{invite_link}")
     mk = types.InlineKeyboardMarkup()
     mk.add(types.InlineKeyboardButton("📨 复制邀请链接", callback_data="copy_invite"))
     bot.send_message(chat_id, txt, reply_markup=mk)
@@ -670,7 +685,7 @@ def cb_send_qr(c):
 def cb_conf(c): bot.answer_callback_query(c.id, "已提交", show_alert=True); bot.send_message(c.message.chat.id, f"✅ 已登记，联系客服领卡: {CUSTOMER_SERVICE}")
 
 if __name__ == "__main__":
-    print(f"🚀 小鶴神 V24.0 ({MAX_MODEL_ID}模型) 已启动")
+    print(f"🚀 小鶴神 V25.0 ({MAX_MODEL_ID}模型) 已启动")
     while True:
         try: bot.infinity_polling(timeout=60, long_polling_timeout=30)
         except requests.exceptions.ReadTimeout: print("超时重连..."); time.sleep(3)
