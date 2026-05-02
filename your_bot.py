@@ -92,7 +92,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 # ==================== 试用系统 ====================
 FREE_TRIAL_COUNT = {}
 MAX_FREE_TRIAL = 3
-CHANNEL_ID = "@xianhe13145200"  # 已修改
+CHANNEL_ID = "@xianhe13145200"
 INVITE_BONUS = {}
 
 
@@ -315,7 +315,7 @@ def new_score_model(hist_data, cfg, mid):
         w1 = math.sin(mid * 0.13 + i)
         w2 = math.cos(mid * 0.21 + i)
         w3 = math.sin(mid * 0.37 + i*2)
-        score = w1 * f1 + w2 * f2 + w3 * f3 + math.sin(score + mid * 0.11) * 0.5 if 'score' in dir() else w1*f1 + w2*f2 + w3*f3
+        score = w1 * f1 + w2 * f2 + w3 * f3
         scores[f] = score
     return sorted(scores, key=scores.get, reverse=True)[:2]
 
@@ -323,6 +323,70 @@ for i in range(301, 601):
     mid = i + 604
     cfg = {"depth": 10 + (i % 90), "slice": i % 5}
     ALL_MODELS[mid] = {"func": lambda h, k, y, c=cfg, m=mid: new_score_model(h, c, m), "info": {"id": mid, "name": f"新双组 D{i-300}", "type": "双组", "params": f"N-S{cfg['slice']}"}}
+
+
+# ==================== 新增200个模型 V3 (1205-1404) ====================
+def new_kill_v3(history, mid):
+    forms = ["大单", "小单", "大双", "小双"]
+    idx = mid % 5
+    h = [x.get("combination", "小单") for x in history[-30:]] if history else forms
+    counts = Counter(h)
+    
+    if idx == 0:
+        target = max(forms, key=lambda x: counts.get(x, 0))
+        reason = "频数热杀"
+    elif idx == 1:
+        target = min(forms, key=lambda x: counts.get(x, 0))
+        reason = "频数冷杀"
+    elif idx == 2:
+        last = h[0] if h else forms[0]
+        opp = {"大单": "小双", "小双": "大单", "大双": "小单", "小单": "大双"}
+        target = opp.get(last, forms[0])
+        reason = "转移对立杀"
+    elif idx == 3:
+        nbr = int(history[0].get('nbr', 0)) if history else 0
+        target = forms[nbr % 4]
+        reason = "周期算子杀"
+    else:
+        total = sum(counts.values()) + 1
+        entropy_scores = {f: (counts.get(f,0)+1)/total for f in forms}
+        target = min(entropy_scores, key=entropy_scores.get)
+        reason = "熵最小杀"
+    
+    return [target], f"[V3] {reason}"
+
+def new_dual_v3(history, mid):
+    forms = ["大单", "小单", "大双", "小双"]
+    idx = mid % 5
+    h = [x.get("combination", "小单") for x in history[-30:]] if history else forms
+    counts = Counter(h)
+    scores = {f: 100.0 for f in forms}
+    
+    for f in forms:
+        if idx == 0:
+            scores[f] += counts.get(f, 0) * 2
+        elif idx == 1:
+            scores[f] -= counts.get(f, 0) * 1.5
+        elif idx == 2:
+            last = h[0] if h else forms[0]
+            opp = {"大单": "小双", "小双": "大单", "大双": "小单", "小单": "大双"}
+            if f == opp.get(last, ""): scores[f] += 30
+        elif idx == 3:
+            nbr = int(history[0].get('nbr', 0)) if history else 0
+            scores[f] += (nbr % 5 + 1) * 5
+        else:
+            total = sum(counts.values()) + 1
+            scores[f] += (counts.get(f,0)+1)/total * 50
+    
+    return sorted(scores, key=scores.get, reverse=True)[:2]
+
+for i in range(1, 101):
+    mid = i + 1204
+    ALL_MODELS[mid] = {"func": lambda h, m=mid: new_kill_v3(h, m), "info": {"id": mid, "name": f"V3杀组 M{i}", "type": "杀组", "params": f"V3-K{i}"}}
+
+for i in range(101, 201):
+    mid = i + 1204
+    ALL_MODELS[mid] = {"func": lambda h, k, y, m=mid: new_dual_v3(h, m), "info": {"id": mid, "name": f"V3双组 D{i-100}", "type": "双组", "params": f"V3-D{i-100}"}}
 
 
 # ==================== 辅助函数 ====================
@@ -356,15 +420,14 @@ def get_invite_link(chat_id):
 def get_backtest_rank_top10(filter_type=None):
     history, keno, yl = get_global_clean_data()
     if len(history) < 25: return []
-    BACKTEST_LEN = min(50, len(history) - 1)  # 50期回测
-    STREAK_LEN = min(200, len(history) - 1)   # 200期连中上限
+    BACKTEST_LEN = min(50, len(history) - 1)
+    STREAK_LEN = min(200, len(history) - 1)
     ranks = []
     for mid, md in ALL_MODELS.items():
         info = md["info"]
         if filter_type and info["type"] != filter_type: continue
         func = md["func"]; mt = info["type"]
         win = 0
-        # 50期胜率
         for i in range(1, BACKTEST_LEN + 1):
             try:
                 h_slice = history[i:]
@@ -377,7 +440,6 @@ def get_backtest_rank_top10(filter_type=None):
                 else:
                     if actual != get_slay_target(pred): win += 1
             except: continue
-        # 200期连中
         streak = ms = 0
         for i in range(1, STREAK_LEN + 1):
             try:
@@ -440,7 +502,7 @@ def run_model_pred(model_id, history, keno, yl):
 
 
 # ==================== 指令 ====================
-MAX_MODEL_ID = 1204
+MAX_MODEL_ID = 1404
 
 @bot.message_handler(commands=['start'])
 def welcome(m):
@@ -459,7 +521,7 @@ def welcome(m):
                     bot.send_message(inviter_id, f"🎉 你邀请了新用户！免费次数+1")
         except: pass
     
-    text = f"欢迎来到『小鶴神』矩阵终端 V25.0\n━━━━━━━━━━━━━━\n{MAX_MODEL_ID}个演算模型\n杀组1-300/605-904 | 双组301-600/905-1204 | 原始601-604\n━━━━━━━━━━━━━━\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次"
+    text = f"欢迎来到『小鶴神』矩阵终端 V25.0\n━━━━━━━━━━━━━━\n{MAX_MODEL_ID}个演算模型\n杀组1-300/605-904/1205-1304 | 双组301-600/905-1204/1305-1404 | 原始601-604\n━━━━━━━━━━━━━━\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次"
     if check_auth(chat_id): bot.send_message(chat_id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
     else:
         if chat_id not in FREE_TRIAL_COUNT: FREE_TRIAL_COUNT[chat_id] = MAX_FREE_TRIAL
