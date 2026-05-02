@@ -203,79 +203,67 @@ def algo_5y_resonance(history):
 # ==================== 604个模型 ====================
 ALL_MODELS = {}
 
-# --- 杀组核心逻辑 ---
-def master_slay_logic(history, config):
-    if not history or len(history) < config['min_len']:
-        return ["小单"], "基础数据不足"
-    all_forms = ["大单", "小单", "大双", "小双"]
-    opposites = {"大单": "小双", "小双": "大单", "大双": "小单", "小单": "大双"}
-    recent = [h.get("combination", "小单") for h in history[:config['lookback']]]
-    counts = Counter(recent)
-    curr = recent[0]
-    mode = config['mode']
-    if mode == "COLD":
-        target = sorted(all_forms, key=lambda x: counts.get(x, 0))[0]
-        reason = f"冷态排除: {target}"
-    elif mode == "HOT":
-        target = sorted(all_forms, key=lambda x: counts.get(x, 0), reverse=True)[0]
-        reason = f"过热回避: {target}"
-    elif mode == "DRAGON":
-        if len(recent) >= config['threshold'] and all(x == curr for x in recent[:config['threshold']]):
-            target = opposites.get(curr, "小单")
-            reason = f"长龙趋势拦截: {target}"
-        else:
-            target = random.choice(all_forms)
-            reason = "非长龙区间随机杀"
-    elif mode == "CYCLE":
-        idx = (int(history[0].get('nbr', 0)) % config['mod_val']) % 4
-        target = all_forms[idx]
-        reason = f"周期性偏移杀: {target}"
+def slayer_factory(history, cfg):
+    forms = ["大单", "小单", "大双", "小双"]
+    h_slice = history[:cfg['depth']]
+    counts = Counter([h['combination'] for h in h_slice])
+    
+    if cfg['type'] == "FREQ":
+        target = max(forms, key=lambda x: counts.get(x, 0)) if cfg['sub'] == "HOT" else min(forms, key=lambda x: counts.get(x, 0))
+        reason = f"{cfg['depth']}期频率排除"
+    elif cfg['type'] == "GAP":
+        last = history[0]['combination']
+        target = forms[(forms.index(last) + cfg['offset']) % 4]
+        reason = f"形态跳程偏移杀"
     else:
-        target = opposites.get(curr, "大单")
-        reason = "形态对称性排除"
+        idx = (int(history[0]['nbr']) * cfg['multiplier'] + cfg['shift']) % 4
+        target = forms[idx]
+        reason = f"周期性算子排除"
+    
     return [target], reason
 
-# --- 双组核心逻辑 ---
-def master_dual_logic(history, keno, yl, config):
-    all_forms = ["大单", "小单", "大双", "小双"]
-    if not history or not keno: return [random.choice(all_forms), random.choice(all_forms)]
-    scores = {cat: 100.0 for cat in all_forms}
-    try:
-        nbrs = [int(n) for n in keno[0].get("nbrs", "").split(",")]
-        p_val = sum([nbrs[i] for i in config['keno_indices'] if i < len(nbrs)]) % 10
-        raw_map = ["小双", "小单", "小双", "小单", "小双", "大单", "大双", "大单", "大双", "大单"]
-        scores[raw_map[p_val]] += config['keno_weight']
-    except: pass
-    for cat in all_forms: scores[cat] += float(yl.get(cat, 0)) * config['yl_weight']
-    recent = [h.get("combination") for h in history[:config['trend_depth']]]
-    for cat in all_forms: scores[cat] += recent.count(cat) * config['trend_weight']
-    return [x[0] for x in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:2]]
-
-# --- 300个杀组模型 (1-300) ---
 for i in range(1, 301):
-    if i <= 60: conf = {'mode': "COLD", 'lookback': 10 + i, 'min_len': 15, 'desc': "冷态流"}
-    elif i <= 120: conf = {'mode': "HOT", 'lookback': 20 + (i-60), 'min_len': 25, 'desc': "热态流"}
-    elif i <= 180: conf = {'mode': "DRAGON", 'lookback': 5, 'threshold': 2 + (i % 4), 'min_len': 10, 'desc': "截龙流"}
-    elif i <= 240: conf = {'mode': "CYCLE", 'mod_val': 3 + (i % 9), 'lookback': 1, 'min_len': 5, 'desc': "周期流"}
-    else: conf = {'mode': "REVERSE", 'lookback': 1, 'min_len': 5, 'desc': "对称流"}
+    cfg = {
+        'depth': 10 + (i % 50),
+        'type': "FREQ" if i <= 100 else ("GAP" if i <= 200 else "MATH"),
+        'sub': "HOT" if i % 2 == 0 else "COLD",
+        'offset': i % 4,
+        'multiplier': (i * 7) % 13,
+        'shift': i % 5
+    }
     ALL_MODELS[i] = {
-        "func": lambda h, c=conf: master_slay_logic(h, c),
-        "info": {"id": i, "name": f"杀组M{i}", "type": "杀组", "params": f"L:{conf['lookback']} M:{conf['mode']}"}
+        "func": lambda h, c=cfg: slayer_factory(h, c),
+        "info": {"id": i, "name": f"杀组 M{i}", "type": "杀组", "params": f"P-{i}"}
     }
 
-# --- 300个双组模型 (301-600) ---
-for i in range(1, 301):
-    mid = i + 300
-    if i <= 75: conf = {'keno_weight': 60 + (i * 0.4), 'yl_weight': 1.5, 'trend_weight': 5, 'trend_depth': 5, 'keno_indices': [1, 4, 7, 10, 13, 16], 'desc': "Keno领先型"}
-    elif i <= 150: conf = {'keno_weight': 30, 'yl_weight': 3.0 + (i * 0.04), 'trend_weight': 10, 'trend_depth': 10, 'keno_indices': [0, 2, 5, 8, 11, 14], 'desc': "遗漏补偿型"}
-    elif i <= 225: conf = {'keno_weight': 20, 'yl_weight': 1.0, 'trend_weight': 15 + (i * 0.15), 'trend_depth': 15 + (i % 7), 'keno_indices': [3, 6, 9, 12, 15, 18], 'desc': "趋势惯性型"}
-    else: conf = {'keno_weight': 45, 'yl_weight': 2.5, 'trend_weight': 12, 'trend_depth': 8, 'keno_indices': random.sample(range(20), 6), 'desc': "混沌均衡型"}
-    ALL_MODELS[mid] = {
-        "func": lambda h, k, y, c=conf: master_dual_logic(h, k, y, c),
-        "info": {"id": mid, "name": f"双组D{i}", "type": "双组", "params": f"K:{conf['keno_weight']:.1f} Y:{conf['yl_weight']:.2f} T:{conf['trend_weight']:.1f}"}
+def dual_factory(history, cfg):
+    forms = ["大单", "小单", "大双", "小双"]
+    scores = {f: 100.0 for f in forms}
+    h_slice = history[:cfg['lookback']]
+    
+    for f in forms:
+        count = [h['combination'] for h in h_slice].count(f)
+        scores[f] += count * cfg['weight_trend']
+        dist = 0
+        for h in history:
+            if h['combination'] == f: break
+            dist += 1
+        scores[f] += dist * cfg['weight_gap']
+
+    res = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [res[0][0], res[1][0]]
+
+for i in range(301, 601):
+    cfg = {
+        'lookback': 5 + (i % 40),
+        'weight_trend': (i % 10) - 5,
+        'weight_gap': (i % 5) * 0.5
+    }
+    ALL_MODELS[i] = {
+        "func": lambda h, k, y, c=cfg: dual_factory(h, c),
+        "info": {"id": i, "name": f"双组 D{i}", "type": "双组", "params": f"W-{i}"}
     }
 
-# --- 4个原始算法 (601-604) ---
 ALL_MODELS[601] = {"func": lambda h, k=None, y=None: algo_v8_hybrid(h, k, y), "info": {"id": 601, "name": "V8-Hybrid 双组(原)", "type": "双组", "params": "原始权重"}}
 ALL_MODELS[602] = {"func": lambda h, k=None, y=None: algo_4d_pi(h), "info": {"id": 602, "name": "4D-PI+PHI 双组(原)", "type": "双组", "params": "原始算力"}}
 ALL_MODELS[603] = {"func": lambda h, k=None, y=None: algo_v23_armor(h), "info": {"id": 603, "name": "Armor V23 杀组(原)", "type": "杀组", "params": "原始装甲"}}
@@ -319,7 +307,7 @@ def main_menu_keyboard():
     kb.add("🔮 输入编号预测", "📊 杀组胜率排行")
     kb.add("📊 双组胜率排行", "📈 数据走势分析")
     kb.add("🔍 模型编号查询", "🔑 购买/续费卡密")
-    kb.add("👤 联系人工客服")
+    kb.add("👤 个人主页", "👤 联系人工客服")
     return kb
 
 def auth_keyboard():
@@ -359,11 +347,11 @@ MAX_MODEL_ID = 604
 
 @bot.message_handler(commands=['start'])
 def welcome(m):
-    text = f"欢迎来到『小鶴神』矩阵终端 V23.0\n━━━━━━━━━━━━━━\n集成{MAX_MODEL_ID}个演算模型\n杀组1-300 | 双组301-600 | 原始601-604\n━━━━━━━━━━━━━━\n输入编号即可预测"
+    text = f"欢迎来到『小鶴神』矩阵终端 V24.0\n━━━━━━━━━━━━━━\n集成{MAX_MODEL_ID}个演算模型\n杀组1-300 | 双组301-600 | 原始601-604\n━━━━━━━━━━━━━━\n输入编号即可预测"
     if check_auth(m.chat.id): bot.send_message(m.chat.id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
     else: bot.send_photo(m.chat.id, IMG_LOGO, caption=text, reply_markup=auth_keyboard())
 
-@bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 杀组胜率排行", "📊 双组胜率排行", "📈 数据走势分析", "🔍 模型编号查询"])
+@bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 杀组胜率排行", "📊 双组胜率排行", "📈 数据走势分析", "🔍 模型编号查询", "👤 个人主页"])
 def protected_features(m):
     if not check_auth(m.chat.id): bot.send_message(m.chat.id, "⚠️ 请先登录", reply_markup=auth_keyboard()); return
     if m.text == "🔮 输入编号预测": bot.send_message(m.chat.id, f"🎯 输入编号 (1-{MAX_MODEL_ID})")
@@ -371,6 +359,7 @@ def protected_features(m):
     elif m.text == "📊 双组胜率排行": show_rank(m, "双组")
     elif m.text == "📈 数据走势分析": data_analysis(m)
     elif m.text == "🔍 模型编号查询": bot.send_message(m.chat.id, f"📋 输入编号 (1-{MAX_MODEL_ID})")
+    elif m.text == "👤 个人主页": show_profile(m)
 
 @bot.message_handler(func=lambda m: m.text.isdigit() and 1 <= int(m.text) <= MAX_MODEL_ID)
 def predict_by_model_id(m):
@@ -479,22 +468,53 @@ def data_analysis(m):
     txt = f"📈 近20期走势\n━━━━━━━━━━━━━━\n📊 形态:\n• 大单: {counter.get('大单',0)} ({counter.get('大单',0)/total*100:.1f}%)\n• 小单: {counter.get('小单',0)} ({counter.get('小单',0)/total*100:.1f}%)\n• 大双: {counter.get('大双',0)} ({counter.get('大双',0)/total*100:.1f}%)\n• 小双: {counter.get('小双',0)} ({counter.get('小双',0)/total*100:.1f}%)\n\n🔥 最大连号: {max_streak}期 ({recent_20[0]})\n📌 当前: {recent_20[0]}\n📊 均和: {avg_total:.1f}\n\n🔴 热号: {', '.join([str(n[0]) for n in hot_nums])}\n🔵 冷号: {', '.join([str(n[0]) for n in cold_nums])}"
     bot.send_message(m.chat.id, txt)
 
+def show_profile(m):
+    chat_id = m.chat.id
+    user = m.from_user
+    first_name = user.first_name if user.first_name else "未知"
+    username = f"@{user.username}" if user.username else "未设置"
+    
+    card_info = "未登录"
+    expire_info = "无"
+    if chat_id in authorized_users:
+        card = authorized_users[chat_id]
+        card_info = card[:12] + "..." if len(card) > 12 else card
+        success, msg = check_card_keyt(card, str(chat_id))
+        if success:
+            expire_info = msg
+        else:
+            expire_info = "已过期"
+    
+    online_count = len(authorized_users)
+    
+    txt = (f"👤 个人主页\n"
+           f"━━━━━━━━━━━━━━\n"
+           f"📛 昵称: {first_name}\n"
+           f"🆔 用户ID: {chat_id}\n"
+           f"📎 用户名: {username}\n"
+           f"🔑 卡密: {card_info}\n"
+           f"⏰ 有效期: {expire_info}\n"
+           f"━━━━━━━━━━━━━━\n"
+           f"🌍 全球在线: {online_count} 人")
+    bot.send_message(m.chat.id, txt)
+
 @bot.message_handler(func=lambda m: m.text == "🔑 购买/续费卡密")
 def buy_panel(m): bot.send_message(m.chat.id, "💎 选择套餐", reply_markup=buy_keyboard())
 
 @bot.message_handler(func=lambda m: m.text == "👤 联系人工客服")
 def kf(m): bot.send_message(m.chat.id, f"👤 客服: {CUSTOMER_SERVICE}")
 
-@bot.message_handler(func=lambda m: m.text.startswith("XHS"))
+@bot.message_handler(func=lambda m: len(m.text) >= 4 and len(m.text) <= 32)
 def auth_proc(m):
     chat_id, card = m.chat.id, m.text.strip()
+    if len(card) < 4: return
     if card in CARD_DATABASE: authorized_users[chat_id] = card; bot.send_message(chat_id, "✅ 登录成功", reply_markup=main_menu_keyboard()); return
     success, msg = check_card_keyt(card, str(chat_id))
-    if success: authorized_users[chat_id] = card; CARD_DATABASE.append(card); bot.send_message(chat_id, f"✅ {msg}", reply_markup=main_menu_keyboard())
+    if success: authorized_users[chat_id] = card; CARD_DATABASE.append(card); bot.send_message(chat_id, f"✅ 登录成功！{msg}", reply_markup=main_menu_keyboard())
     else: bot.send_message(chat_id, f"❌ {msg}")
 
 @bot.callback_query_handler(func=lambda c: c.data == "login_entry")
-def cb_login(c): bot.answer_callback_query(c.id); bot.send_message(c.message.chat.id, "⌨️ 输入 XHS 开头卡密")
+def cb_login(c): bot.answer_callback_query(c.id); bot.send_message(c.message.chat.id, "⌨️ 请输入卡密完成登录")
 
 @bot.callback_query_handler(func=lambda c: c.data == "buy_entry")
 def cb_buy_entry(c): bot.answer_callback_query(c.id); bot.send_message(c.message.chat.id, "💎 选择套餐", reply_markup=buy_keyboard())
@@ -517,7 +537,7 @@ def cb_send_qr(c):
 def cb_conf(c): bot.answer_callback_query(c.id, "已提交", show_alert=True); bot.send_message(c.message.chat.id, f"✅ 已登记，联系客服领卡: {CUSTOMER_SERVICE}")
 
 if __name__ == "__main__":
-    print(f"🚀 小鶴神 V23.0 ({MAX_MODEL_ID}模型) 已启动")
+    print(f"🚀 小鶴神 V24.0 ({MAX_MODEL_ID}模型) 已启动")
     while True:
         try: bot.infinity_polling(timeout=60, long_polling_timeout=30)
         except requests.exceptions.ReadTimeout: print("超时重连..."); time.sleep(3)
