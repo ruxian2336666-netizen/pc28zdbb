@@ -67,7 +67,7 @@ def check_card_keyt(card, user_id):
         return False, f"验证异常: {e}"
 
 # ==================== 核心配置 ====================
-BOT_TOKEN = "8789627493:AAExE8z-tRhrbGvENYVt4dxqWUFf56rrZJQ"
+BOT_TOKEN = "8789627493:AAEyL0iSKthO8ZJyQuXLTnVed4oKoQLJWKg"
 IMG_LOGO = "https://s41.ax1x.com/2026/05/01/peTZHDU.jpg"
 IMG_WECHAT = "https://s41.ax1x.com/2026/05/01/peTZ7uT.jpg"
 IMG_ALIPAY = "https://s41.ax1x.com/2026/05/01/peTE1a9.jpg"
