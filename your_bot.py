@@ -97,6 +97,7 @@ INVITE_BONUS = {}
 
 # ==================== 回测缓存 ====================
 backtest_cache = {}
+dynamic_cache = {}
 
 
 # ==================== 数据获取 ====================
@@ -363,6 +364,74 @@ for i in range(101, 201):
     ALL_MODELS[mid] = {"func": lambda h, k, y, m=mid: new_dual_v3(h, m), "info": {"id": mid, "name": f"V3双组 D{i-100}", "type": "双组", "params": f"V3-D{i-100}"}}
 
 
+# ==================== 动态AI双组模型 ====================
+def dynamic_ai_dual_model(history, cfg):
+    forms = ["大单", "小单", "大双", "小双"]
+    
+    def logic_regression(h):
+        scores = {f: 0 for f in forms}
+        for f in forms:
+            dist = 0
+            for item in h:
+                if item['combination'] == f: break
+                dist += 1
+            scores[f] = dist
+        return scores
+
+    def logic_momentum(h):
+        recent = [item['combination'] for item in h[:10]]
+        return {f: recent.count(f) for f in forms}
+
+    performance_a = 0
+    performance_b = 0
+    
+    for i in range(1, min(21, len(history))):
+        test_h = history[i:]
+        actual = history[i-1]['combination']
+        
+        pred_a = sorted(logic_regression(test_h).items(), key=lambda x: x[1], reverse=True)
+        if actual in [pred_a[0][0], pred_a[1][0]]:
+            performance_a += 1
+        
+        pred_b = sorted(logic_momentum(test_h).items(), key=lambda x: x[1], reverse=True)
+        if actual in [pred_b[0][0], pred_b[1][0]]:
+            performance_b += 1
+
+    total_perf = (performance_a + performance_b) or 1
+    w_a = performance_a / total_perf
+    w_b = performance_b / total_perf
+    
+    final_scores = {f: 0 for f in forms}
+    score_a = logic_regression(history)
+    score_b = logic_momentum(history)
+    
+    for f in forms:
+        final_scores[f] = (score_a[f] * w_a) + (score_b[f] * w_b)
+
+    res = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
+    return [res[0][0], res[1][0]], f"动态权重(回补:{w_a:.2f}/惯性:{w_b:.2f})"
+
+def get_cached_dynamic(history):
+    if not history: return {"rate": 0, "streak": 0, "max_streak": 0, "total": 0}
+    issue = history[0]['nbr']
+    if "dynamic" in dynamic_cache and dynamic_cache["dynamic"]["issue"] == issue:
+        return dynamic_cache["dynamic"]["data"]
+    
+    win = 0; streak = 0; ms = 0
+    bt_len = min(50, len(history) - 1)
+    for i in range(1, bt_len + 1):
+        try:
+            result, _ = dynamic_ai_dual_model(history[i:], {})
+            if history[i-1]['combination'] in result: win += 1; streak += 1
+            else: streak = 0
+            ms = max(ms, streak)
+        except: continue
+    
+    data = {"rate": (win/bt_len)*100, "streak": streak, "max_streak": ms, "total": bt_len}
+    dynamic_cache["dynamic"] = {"issue": issue, "data": data}
+    return data
+
+
 # ==================== 辅助函数 ====================
 def get_slay_target(pred):
     if isinstance(pred, tuple): pred = pred[0]
@@ -392,17 +461,13 @@ def get_invite_link(chat_id):
 
 # ==================== 回测缓存系统 ====================
 def get_cached_backtest(model_id, history, keno, yl, test_len=50, streak_len=200):
-    """带缓存的回测：同一期号不重复计算"""
     if not history: return None
     current_issue = history[0]['nbr']
-    
-    # 检查缓存
     if model_id in backtest_cache:
         cached = backtest_cache[model_id]
         if cached.get("issue") == current_issue:
             return cached["data"]
     
-    # 重新计算
     info = ALL_MODELS[model_id]["info"]
     mt = info["type"]
     func = ALL_MODELS[model_id]["func"]
@@ -442,10 +507,7 @@ def get_cached_backtest(model_id, history, keno, yl, test_len=50, streak_len=200
         except: continue
     
     result = {"win": win_count, "total": bt_len, "rate": (win_count/bt_len)*100, "streak": streak, "max_streak": ms}
-    
-    # 存入缓存
     backtest_cache[model_id] = {"issue": current_issue, "data": result}
-    
     return result
 
 
@@ -468,8 +530,9 @@ def main_menu_keyboard():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     kb.add("🔮 输入编号预测", "📊 杀组胜率排行")
     kb.add("📊 双组胜率排行", "📈 数据走势分析")
-    kb.add("🔍 模型编号查询", "🔑 购买/续费卡密")
-    kb.add("👤 个人主页", "👤 联系人工客服")
+    kb.add("🧠 动态AI双组", "🔍 模型编号查询")
+    kb.add("🔑 购买/续费卡密", "👤 个人主页")
+    kb.add("👤 联系人工客服")
     return kb
 
 def auth_keyboard():
@@ -520,13 +583,13 @@ def welcome(m):
                     elif inviter_id not in authorized_users: FREE_TRIAL_COUNT[inviter_id] = MAX_FREE_TRIAL + 1
                     bot.send_message(inviter_id, f"🎉 你邀请了新用户！免费次数+1")
         except: pass
-    text = f"欢迎来到『小鶴神』矩阵终端 V25.0\n━━━━━━━━━━━━━━\n{MAX_MODEL_ID}个演算模型\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次"
+    text = f"欢迎来到『小鶴神』矩阵终端 V26.0\n━━━━━━━━━━━━━━\n{MAX_MODEL_ID}个演算模型 + 动态AI\n🎁 新用户免费试用 {MAX_FREE_TRIAL} 次"
     if check_auth(chat_id): bot.send_message(chat_id, "✨ 主控台已就绪", reply_markup=main_menu_keyboard())
     else:
         if chat_id not in FREE_TRIAL_COUNT: FREE_TRIAL_COUNT[chat_id] = MAX_FREE_TRIAL
         bot.send_photo(chat_id, IMG_LOGO, caption=text, reply_markup=auth_keyboard())
 
-@bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 杀组胜率排行", "📊 双组胜率排行", "📈 数据走势分析", "🔍 模型编号查询", "👤 个人主页"])
+@bot.message_handler(func=lambda m: m.text in ["🔮 输入编号预测", "📊 杀组胜率排行", "📊 双组胜率排行", "📈 数据走势分析", "🔍 模型编号查询", "👤 个人主页", "🧠 动态AI双组"])
 def protected_features(m):
     chat_id = m.chat.id
     if not check_auth(chat_id):
@@ -545,6 +608,16 @@ def handle_feature(m):
     elif m.text == "📈 数据走势分析": data_analysis(m)
     elif m.text == "🔍 模型编号查询": bot.send_message(chat_id, f"📋 输入编号 (1-{MAX_MODEL_ID})")
     elif m.text == "👤 个人主页": show_profile(m)
+    elif m.text == "🧠 动态AI双组":
+        history, keno, yl = get_global_clean_data()
+        if not history: bot.send_message(chat_id, "❌ 数据不足"); return
+        result, reason = dynamic_ai_dual_model(history, {})
+        next_issue = int(history[0]['nbr']) + 1
+        bt = get_cached_dynamic(history)
+        msg = (f"🧠 动态AI双组模型\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n🔥 双组: 【 {result[0]} + {result[1]} 】\n📝 {reason}\n━━━━━━━━━━━━━━\n📈 近50期: {bt['rate']:.1f}%\n🔥 连中: {bt['streak']} | 最大: {bt['max_streak']}")
+        mk = types.InlineKeyboardMarkup()
+        mk.add(types.InlineKeyboardButton("🔄 刷新", callback_data="refresh_dynamic"))
+        bot.send_message(chat_id, msg, reply_markup=mk)
 
 def deduct_trial(chat_id):
     if chat_id not in authorized_users and chat_id in FREE_TRIAL_COUNT:
@@ -566,7 +639,6 @@ def predict_by_model_id(m):
     result, info = run_model_pred(model_id, history, keno, yl)
     if result is None: bot.send_message(chat_id, f"❌ 模型{model_id}演算失败"); return
     
-    # 使用缓存回测
     bt = get_cached_backtest(model_id, history, keno, yl)
     if bt is None: bot.send_message(chat_id, "❌ 回测失败"); return
     
@@ -584,7 +656,7 @@ def predict_by_model_id(m):
         bot.send_message(chat_id, msg, reply_markup=predict_refresh_keyboard(model_id))
     except Exception as e: bot.send_message(chat_id, f"❌ 处理异常: {e}")
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("refresh_"))
+@bot.callback_query_handler(func=lambda c: c.data.startswith("refresh_") and not c.data.startswith("refresh_dynamic"))
 def cb_refresh(c):
     chat_id = c.message.chat.id
     if not check_auth(chat_id):
@@ -599,9 +671,7 @@ def cb_refresh(c):
     result, info = run_model_pred(model_id, history, keno, yl)
     if result is None: bot.answer_callback_query(c.id, "演算失败", show_alert=True); return
     
-    # 强制刷新回测（刷新按钮不缓存）
-    if model_id in backtest_cache:
-        del backtest_cache[model_id]
+    if model_id in backtest_cache: del backtest_cache[model_id]
     bt = get_cached_backtest(model_id, history, keno, yl)
     if bt is None: bot.answer_callback_query(c.id, "回测失败", show_alert=True); return
     
@@ -619,6 +689,29 @@ def cb_refresh(c):
         bot.edit_message_text(msg, chat_id, c.message.message_id, reply_markup=predict_refresh_keyboard(model_id))
         bot.answer_callback_query(c.id, "✅ 已刷新")
     except Exception as e: bot.answer_callback_query(c.id, f"错误: {e}", show_alert=True)
+
+@bot.callback_query_handler(func=lambda c: c.data == "refresh_dynamic")
+def cb_refresh_dynamic(c):
+    chat_id = c.message.chat.id
+    if not check_auth(chat_id):
+        bot.answer_callback_query(c.id, "⚠️ 请先登录", show_alert=True)
+        return
+    
+    history, keno, yl = get_global_clean_data()
+    if not history: bot.answer_callback_query(c.id, "数据不足", show_alert=True); return
+    
+    if "dynamic" in dynamic_cache: del dynamic_cache["dynamic"]
+    
+    result, reason = dynamic_ai_dual_model(history, {})
+    next_issue = int(history[0]['nbr']) + 1
+    bt = get_cached_dynamic(history)
+    
+    msg = (f"🔄 动态AI双组模型\n━━━━━━━━━━━━━━\n📡 上期: {history[0]['nbr']}期 → {history[0]['combination']}\n🎯 预测: {next_issue}期\n\n🔥 双组: 【 {result[0]} + {result[1]} 】\n📝 {reason}\n━━━━━━━━━━━━━━\n📈 近50期: {bt['rate']:.1f}%\n🔥 连中: {bt['streak']} | 最大: {bt['max_streak']}")
+    
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("🔄 刷新", callback_data="refresh_dynamic"))
+    bot.edit_message_text(msg, chat_id, c.message.message_id, reply_markup=mk)
+    bot.answer_callback_query(c.id, "✅ 已刷新")
 
 @bot.callback_query_handler(func=lambda c: c.data == "change_model")
 def cb_change(c): bot.answer_callback_query(c.id); bot.send_message(c.message.chat.id, f"🎯 输入新编号 (1-{MAX_MODEL_ID})")
@@ -724,7 +817,7 @@ def cb_send_qr(c):
 def cb_conf(c): bot.answer_callback_query(c.id, "已提交", show_alert=True); bot.send_message(c.message.chat.id, f"✅ 已登记，联系客服领卡: {CUSTOMER_SERVICE}")
 
 if __name__ == "__main__":
-    print(f"🚀 小鶴神 V25.0 ({MAX_MODEL_ID}模型，带回测缓存) 已启动")
+    print(f"🚀 小鶴神 V26.0 ({MAX_MODEL_ID}模型 + 动态AI) 已启动")
     while True:
         try: bot.infinity_polling(timeout=60, long_polling_timeout=30)
         except requests.exceptions.ReadTimeout: print("超时重连..."); time.sleep(3)
